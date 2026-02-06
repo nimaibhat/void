@@ -1,16 +1,159 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.yaml
 language: "en-US"
 tone_instructions: "Gen Z code reviewer. Roast bad code with slang like no cap, mid, sus, L take, vibe check failed, caught in 4k. Hype good code with W, based, slay. Be unhinged but always give real actionable feedback after the joke."
-early_access: false
+early_access: true
+enable_free_tier: true
+
 reviews:
   profile: "assertive"
-  request_changes_workflow: false
+  request_changes_workflow: true
   high_level_summary: true
   high_level_summary_placeholder: "@coderabbit"
-  poem: false
+  high_level_summary_in_walkthrough: false
+  auto_title_placeholder: "@coderabbit"
   review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: false
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: true
+  suggested_reviewers: true
+  auto_assign_reviewers: true
+  in_progress_fortune: true
+  poem: true
+  enable_prompt_for_ai_agents: true
+  abort_on_close: true
+  disable_cache: false
+
+  labeling_instructions:
+    - label: "frontend"
+      instructions: "Apply when changes touch React components, CSS, or UI logic"
+    - label: "backend"
+      instructions: "Apply when changes touch API routes, server logic, or database"
+    - label: "bug"
+      instructions: "Apply when the PR fixes a bug or resolves an error"
+    - label: "feature"
+      instructions: "Apply when the PR adds new functionality"
+    - label: "refactor"
+      instructions: "Apply when the PR restructures code without changing behavior"
+    - label: "docs"
+      instructions: "Apply when the PR updates documentation or comments"
+
+  path_instructions:
+    - path: "src/components/**"
+      instructions: "Focus on React best practices, component reusability, and performance. Check for unnecessary re-renders."
+    - path: "src/app/**"
+      instructions: "Check Next.js conventions, proper use of server vs client components, and routing patterns."
+    - path: "**/*.css"
+      instructions: "Check for Tailwind best practices and responsive design."
+    - path: "**/*.ts"
+      instructions: "Ensure proper TypeScript types are used. No 'any' types allowed."
+
   auto_review:
     enabled: true
+    auto_incremental_review: true
     drafts: false
+    base_branches: []
+    ignore_title_keywords: []
+    labels: []
+    ignore_usernames: []
+
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+
+  tools:
+    ast-grep:
+      enabled: true
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    biome:
+      enabled: true
+    hadolint:
+      enabled: true
+    yamllint:
+      enabled: true
+    eslint:
+      enabled: true
+    oxc:
+      enabled: true
+    gitleaks:
+      enabled: true
+    checkov:
+      enabled: true
+    semgrep:
+      enabled: true
+    actionlint:
+      enabled: true
+    htmlhint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 120000
+    languagetool:
+      enabled: true
+    dotenvLint:
+      enabled: true
+
+  pre_merge_checks:
+    title:
+      mode: "warning"
+    description:
+      mode: "warning"
+    issue_assessment:
+      mode: "warning"
+    docstrings:
+      mode: "warning"
+      threshold: 70
+
 chat:
   auto_reply: true
+  art: true
+  integrations:
+    jira:
+      usage: "auto"
+    linear:
+      usage: "auto"
+
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+  learnings:
+    scope: "auto"
+  issues:
+    scope: "auto"
+  pull_requests:
+    scope: "auto"
+
+code_generation:
+  docstrings:
+    language: "en-US"
+  unit_tests:
+    path_instructions:
+      - path: "src/**"
+        instructions: "Use Jest and React Testing Library for component tests. Test user interactions and rendered output."
+
+issue_enrichment:
+  auto_enrich:
+    enabled: true
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: true
+  labeling:
+    auto_apply_labels: true
+
