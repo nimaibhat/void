@@ -1,27 +1,20 @@
-"""ACTIVSg2000 + Travis 150 grid loader — parses MATPOWER .m + PowerWorld .aux
-files into a NetworkX graph with ~2173 buses (2000 ACTIVSg2000 + 173 Travis
-County overlay), generators, and branches.
+"""ACTIVSg2000 + Travis 150 grid loader — reads node and edge data from
+Supabase tables (``grid_nodes``, ``travis_nodes``, ``grid_edges``) and
+builds a NetworkX graph with ~2173 buses.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-import re
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import networkx as nx
-import pandas as pd
-from matpowercaseframes import CaseFrames
+import requests
 
 from app.config import settings
 
 logger = logging.getLogger("blackout.grid_graph")
-
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-CACHE_JSON = DATA_DIR / "activsg2000" / "parsed_grid.json"
 
 # ── ERCOT Weather Zone bounding boxes ────────────────────────────────
 # Ordered from most specific to least; first match wins.
@@ -66,364 +59,74 @@ def _classify_weather_zone(lat: float, lon: float) -> str:
     return best_zone
 
 
-# ── Generic AUX block parser ─────────────────────────────────────────
+# ── Supabase data fetching ───────────────────────────────────────────
 
 
-def _tokenize_aux_line(line: str) -> List[str]:
-    """Split an AUX data line by whitespace, respecting quoted strings."""
-    tokens: List[str] = []
-    i = 0
-    while i < len(line):
-        if line[i] == '"':
-            j = line.find('"', i + 1)
-            if j == -1:
-                j = len(line)
-            tokens.append(line[i + 1:j])
-            i = j + 1
-        elif line[i].isspace():
-            i += 1
-        else:
-            j = i
-            while j < len(line) and not line[j].isspace() and line[j] != '"':
-                j += 1
-            tokens.append(line[i:j])
-            i = j
-    return tokens
+def _supabase_headers() -> Dict[str, str]:
+    key = settings.supabase_anon_key
+    return {"apikey": key, "Authorization": f"Bearer {key}"}
 
 
-def _parse_aux_block(aux_text: str, block_name: str) -> List[Tuple[List[str], List[List[str]]]]:
-    """Parse all DATA (BlockName, [fields]) { ... } blocks from AUX text.
+def _fetch_all_rows(table: str, select: str = "*") -> List[Dict[str, Any]]:
+    """Fetch all rows from a Supabase table, paginating as needed."""
+    url = settings.supabase_url
+    headers = _supabase_headers()
+    page_size = 5000
+    offset = 0
+    all_rows: List[Dict[str, Any]] = []
 
-    Returns a list of (field_names, rows) tuples — one per matching block.
-    Each row is a list of string tokens.
-    """
-    pattern = re.compile(
-        r'DATA\s*\(' + re.escape(block_name) + r'\s*,\s*\[([^\]]+)\]\s*\)\s*\{(.*?)\}',
-        re.DOTALL,
-    )
-    results = []
-    for match in pattern.finditer(aux_text):
-        header_str = match.group(1)
-        body = match.group(2)
+    while True:
+        api_url = (
+            f"{url}/rest/v1/{table}"
+            f"?select={select}&order=id&limit={page_size}&offset={offset}"
+        )
+        resp = requests.get(api_url, headers=headers, timeout=30)
+        if not resp.ok:
+            logger.error("Supabase %s fetch failed (%s): %s", table, resp.status_code, resp.text[:200])
+            break
+        rows = resp.json()
+        if not rows:
+            break
+        all_rows.extend(rows)
+        offset += page_size
+        if len(rows) < page_size:
+            break
 
-        fields = [f.strip() for f in header_str.replace("\n", " ").split(",")]
-
-        rows: List[List[str]] = []
-        for line in body.strip().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            tokens = _tokenize_aux_line(line)
-            if tokens:
-                rows.append(tokens)
-
-        results.append((fields, rows))
-
-    return results
+    return all_rows
 
 
-# ── ACTIVSg2000 AUX parser (uses generic block parser) ──────────────
-
-
-def _parse_aux_bus_data(aux_path: Path) -> Dict[int, Dict[str, Any]]:
-    """Parse the Bus DATA block from a PowerWorld .aux file.
-
-    Returns {bus_num: {lat, lon, area, zone, sub_num}}.
-    """
-    text = aux_path.read_text(encoding="utf-8", errors="replace")
-    blocks = _parse_aux_block(text, "Bus")
-    if not blocks:
-        raise ValueError("Could not find Bus DATA block in .aux file")
-
-    fields, rows = blocks[0]
-    field_idx = {f: i for i, f in enumerate(fields)}
-
-    result: Dict[int, Dict[str, Any]] = {}
-    for tokens in rows:
-        try:
-            bus_num = int(tokens[field_idx["BusNum"]])
-            lat = float(tokens[field_idx["Latitude:1"]])
-            lon = float(tokens[field_idx["Longitude:1"]])
-            area = int(tokens[field_idx["AreaNum"]])
-            zone = int(tokens[field_idx["ZoneNum"]])
-            sub_num = int(tokens[field_idx["SubNum"]])
-        except (ValueError, IndexError, KeyError):
-            continue
-
-        result[bus_num] = {
-            "lat": lat,
-            "lon": lon,
-            "area": area,
-            "zone": zone,
-            "sub_num": sub_num,
-        }
-
-    return result
-
-
-# ── ACTIVSg2000 grid builder ─────────────────────────────────────────
-
-
-def _build_grid_data(case_path: Path, aux_path: Path) -> Dict[str, Any]:
-    """Parse MATPOWER + AUX and build nodes/edges dicts."""
-    logger.info("Parsing ACTIVSg2000 MATPOWER case: %s", case_path)
-    cf = CaseFrames(str(case_path))
-
-    bus_df = cf.bus
-    gen_df = cf.gen
-    branch_df = cf.branch
-
-    logger.info(
-        "MATPOWER: %d buses, %d generators, %d branches",
-        len(bus_df), len(gen_df), len(branch_df),
-    )
-
-    # Parse AUX for lat/lon
-    logger.info("Parsing AUX file for coordinates: %s", aux_path)
-    aux_data = _parse_aux_bus_data(aux_path)
-    logger.info("AUX: %d bus entries with lat/lon", len(aux_data))
-
-    # Sum generator Pmax per bus
-    gen_capacity: Dict[int, float] = {}
-    for _, row in gen_df.iterrows():
-        bus = int(row.iloc[0])  # gen bus number
-        pmax = float(row.iloc[8])  # Pmax
-        gen_capacity[bus] = gen_capacity.get(bus, 0.0) + pmax
-
-    # Build nodes
+def _rows_to_nodes(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert Supabase node rows to the internal node dict format."""
     nodes: List[Dict[str, Any]] = []
-    bus_to_idx: Dict[int, int] = {}
-
-    for idx, (_, row) in enumerate(bus_df.iterrows()):
-        bus_num = int(row.iloc[0])
-        bus_type = int(row.iloc[1])
-        pd_mw = float(row.iloc[2])  # Real power demand
-        base_kv = float(row.iloc[9])  # baseKV
-        area = int(row.iloc[10]) if len(row) > 10 else 1
-
-        # Get lat/lon from AUX
-        aux = aux_data.get(bus_num)
-        if aux is None:
-            continue  # Skip buses without location data
-
-        lat = aux["lat"]
-        lon = aux["lon"]
-        grid_zone = aux["zone"]
-
-        # Classify into ERCOT weather zone
-        weather_zone = _classify_weather_zone(lat, lon)
-
-        # Capacity: sum of generator Pmax at this bus
-        cap = gen_capacity.get(bus_num, 0.0)
-
-        # Non-generator buses: fallback capacity
-        if cap <= 0:
-            cap = max(pd_mw * 1.3, 1.0)
-
-        nid = f"B{bus_num}"
-        bus_to_idx[bus_num] = idx
-
+    for r in rows:
         nodes.append({
-            "id": nid,
-            "bus_num": bus_num,
-            "lat": round(lat, 6),
-            "lon": round(lon, 6),
-            "base_load_mw": round(max(pd_mw, 0.0), 2),
-            "capacity_mw": round(cap, 2),
-            "voltage_kv": round(base_kv, 1),
-            "region": "ERCOT",
-            "weather_zone": weather_zone,
-            "area": area,
-            "grid_zone": grid_zone,
-            "source": "activsg2000",
+            "id": r["id"],
+            "bus_num": r.get("bus_num", 0),
+            "lat": float(r["lat"]),
+            "lon": float(r["lon"]),
+            "base_load_mw": float(r.get("base_load_mw", 0)),
+            "capacity_mw": float(r.get("capacity_mw", 1)),
+            "voltage_kv": float(r.get("voltage_kv", 0)),
+            "region": r.get("region", "ERCOT"),
+            "weather_zone": r.get("weather_zone", "South Central"),
+            "area": int(r.get("area", 1)),
+            "grid_zone": int(r.get("grid_zone", 0)),
+            "source": r.get("source", "activsg2000"),
         })
+    return nodes
 
-    # Build edges from branch data
+
+def _rows_to_edges(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert Supabase edge rows to the internal edge dict format."""
     edges: List[Dict[str, Any]] = []
-    valid_buses = {n["bus_num"] for n in nodes}
-
-    for _, row in branch_df.iterrows():
-        fbus = int(row.iloc[0])
-        tbus = int(row.iloc[1])
-        rate_a = float(row.iloc[5])  # Long-term MVA rating
-        impedance = float(row.iloc[3])  # reactance (x)
-
-        if fbus not in valid_buses or tbus not in valid_buses:
-            continue
-
+    for r in rows:
         edges.append({
-            "from_bus": f"B{fbus}",
-            "to_bus": f"B{tbus}",
-            "capacity_mva": round(rate_a, 1) if rate_a > 0 else 100.0,
-            "impedance": round(impedance, 6),
+            "from_bus": r["from_bus"],
+            "to_bus": r["to_bus"],
+            "capacity_mva": float(r.get("capacity_mva", 100)),
+            "impedance": float(r.get("impedance", 0.001)),
         })
-
-    logger.info("Built ACTIVSg2000 grid: %d nodes, %d edges", len(nodes), len(edges))
-    return {"nodes": nodes, "edges": edges}
-
-
-# ── Travis 150 grid builder ──────────────────────────────────────────
-
-
-def _build_travis150_data(aux_path: Path) -> Dict[str, Any]:
-    """Parse Travis 150 Electric AUX into nodes + edges.
-
-    The Travis 150 AUX has a different structure than ACTIVSg2000:
-    - Lat/lon lives on the Substation block, not Bus
-    - Load data is in a separate Load block
-    - Bus numbers 1-173 (no overlap with ACTIVSg2000's 1001-3999)
-    """
-    logger.info("Parsing Travis 150 AUX: %s", aux_path)
-    text = aux_path.read_text(encoding="utf-8", errors="replace")
-
-    # 1. Parse Substation block → {sub_num: {lat, lon}}
-    sub_blocks = _parse_aux_block(text, "Substation")
-    if not sub_blocks:
-        raise ValueError("Could not find Substation DATA block in Travis 150 AUX")
-    sub_fields, sub_rows = sub_blocks[0]
-    sub_idx = {f: i for i, f in enumerate(sub_fields)}
-
-    substations: Dict[int, Dict[str, float]] = {}
-    for tokens in sub_rows:
-        try:
-            sub_num = int(tokens[sub_idx["SubNum"]])
-            lat = float(tokens[sub_idx["Latitude"]])
-            lon = float(tokens[sub_idx["Longitude"]])
-        except (ValueError, IndexError, KeyError):
-            continue
-        substations[sub_num] = {"lat": lat, "lon": lon}
-
-    logger.info("Travis 150: %d substations", len(substations))
-
-    # 2. Parse Bus block → {bus_num: {sub_num, voltage_kv}}
-    bus_blocks = _parse_aux_block(text, "Bus")
-    if not bus_blocks:
-        raise ValueError("Could not find Bus DATA block in Travis 150 AUX")
-    bus_fields, bus_rows = bus_blocks[0]
-    bus_idx = {f: i for i, f in enumerate(bus_fields)}
-
-    buses: Dict[int, Dict[str, Any]] = {}
-    for tokens in bus_rows:
-        try:
-            bus_num = int(tokens[bus_idx["BusNum"]])
-            voltage_kv = float(tokens[bus_idx["BusNomVolt"]])
-            sub_num = int(tokens[bus_idx["SubNum"]])
-        except (ValueError, IndexError, KeyError):
-            continue
-        sub = substations.get(sub_num)
-        if sub is None:
-            continue
-        buses[bus_num] = {
-            "sub_num": sub_num,
-            "voltage_kv": voltage_kv,
-            "lat": sub["lat"],
-            "lon": sub["lon"],
-        }
-
-    logger.info("Travis 150: %d buses", len(buses))
-
-    # 3. Parse Load block → {bus_num: load_mw}
-    load_blocks = _parse_aux_block(text, "Load")
-    load_per_bus: Dict[int, float] = {}
-    if load_blocks:
-        load_fields, load_rows = load_blocks[0]
-        load_idx = {f: i for i, f in enumerate(load_fields)}
-        for tokens in load_rows:
-            try:
-                bus_num = int(tokens[load_idx["BusNum"]])
-                status = tokens[load_idx["LoadStatus"]]
-                if status != "Closed":
-                    continue
-                load_mw = float(tokens[load_idx["LoadSMW"]])
-            except (ValueError, IndexError, KeyError):
-                continue
-            load_per_bus[bus_num] = load_per_bus.get(bus_num, 0.0) + load_mw
-
-    logger.info("Travis 150: %d buses with loads, total %.1f MW",
-                len(load_per_bus), sum(load_per_bus.values()))
-
-    # 4. Parse Gen block → {bus_num: total_gen_mw}
-    gen_blocks = _parse_aux_block(text, "Gen")
-    gen_per_bus: Dict[int, float] = {}
-    if gen_blocks:
-        gen_fields, gen_rows = gen_blocks[0]
-        gen_idx = {f: i for i, f in enumerate(gen_fields)}
-        for tokens in gen_rows:
-            try:
-                bus_num = int(tokens[gen_idx["BusNum"]])
-                status = tokens[gen_idx["GenStatus"]]
-                if status != "Closed":
-                    continue
-                gen_mw_max = float(tokens[gen_idx["GenMWMax"]])
-            except (ValueError, IndexError, KeyError):
-                continue
-            gen_per_bus[bus_num] = gen_per_bus.get(bus_num, 0.0) + gen_mw_max
-
-    logger.info("Travis 150: %d buses with generation, total %.1f MW",
-                len(gen_per_bus), sum(gen_per_bus.values()))
-
-    # 5. Parse Branch blocks (there are TWO — lines + transformers)
-    branch_blocks = _parse_aux_block(text, "Branch")
-    raw_edges: List[Dict[str, Any]] = []
-    for br_fields, br_rows in branch_blocks:
-        br_idx = {f: i for i, f in enumerate(br_fields)}
-        for tokens in br_rows:
-            try:
-                fbus = int(tokens[br_idx["BusNum"]])
-                tbus = int(tokens[br_idx["BusNum:1"]])
-                status = tokens[br_idx["LineStatus"]]
-                if status != "Closed":
-                    continue
-                line_x = float(tokens[br_idx["LineX"]])
-                line_mva = float(tokens[br_idx["LineAMVA"]])
-            except (ValueError, IndexError, KeyError):
-                continue
-            raw_edges.append({
-                "fbus": fbus, "tbus": tbus,
-                "capacity_mva": line_mva, "impedance": line_x,
-            })
-
-    logger.info("Travis 150: %d branch entries (closed)", len(raw_edges))
-
-    # 6. Build nodes
-    nodes: List[Dict[str, Any]] = []
-    valid_bus_nums = set(buses.keys())
-
-    for bus_num, bdata in buses.items():
-        base_load = load_per_bus.get(bus_num, 0.0)
-        cap = gen_per_bus.get(bus_num, 0.0)
-        if cap <= 0:
-            cap = max(base_load * 1.3, 1.0)
-
-        nodes.append({
-            "id": f"T{bus_num}",
-            "bus_num": bus_num,
-            "lat": round(bdata["lat"], 6),
-            "lon": round(bdata["lon"], 6),
-            "base_load_mw": round(max(base_load, 0.0), 2),
-            "capacity_mw": round(cap, 2),
-            "voltage_kv": round(bdata["voltage_kv"], 1),
-            "region": "ERCOT",
-            "weather_zone": "South Central",
-            "area": 9,
-            "grid_zone": 0,
-            "source": "travis150",
-        })
-
-    # 7. Build edges
-    edges: List[Dict[str, Any]] = []
-    for e in raw_edges:
-        if e["fbus"] not in valid_bus_nums or e["tbus"] not in valid_bus_nums:
-            continue
-        edges.append({
-            "from_bus": f"T{e['fbus']}",
-            "to_bus": f"T{e['tbus']}",
-            "capacity_mva": round(e["capacity_mva"], 1) if e["capacity_mva"] > 0 else 100.0,
-            "impedance": round(abs(e["impedance"]), 6),
-        })
-
-    logger.info("Built Travis 150 grid: %d nodes, %d edges", len(nodes), len(edges))
-    return {"nodes": nodes, "edges": edges}
+    return edges
 
 
 # ── Tie line creation ────────────────────────────────────────────────
@@ -501,24 +204,14 @@ class GridGraphService:
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Load grid from cache or parse MATPOWER+AUX files + Travis 150."""
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        """Load grid data from Supabase tables and build NetworkX graph."""
+        url = settings.supabase_url
+        key = settings.supabase_anon_key
+        if not url or not key:
+            logger.warning("Supabase not configured — cannot load grid")
+            return
 
-        if CACHE_JSON.exists():
-            logger.info("Loading cached parsed grid from %s", CACHE_JSON)
-            data = json.loads(CACHE_JSON.read_text())
-            # Check if cache includes Travis 150 (has source field)
-            if data["nodes"] and "source" not in data["nodes"][0]:
-                logger.info("Cache missing Travis 150 data, rebuilding...")
-                CACHE_JSON.unlink()
-                data = self._build_merged_grid()
-                CACHE_JSON.write_text(json.dumps(data))
-                logger.info("Cached merged grid to %s", CACHE_JSON)
-        else:
-            data = self._build_merged_grid()
-            CACHE_JSON.write_text(json.dumps(data))
-            logger.info("Cached merged grid to %s", CACHE_JSON)
-
+        data = self._fetch_and_merge()
         self._raw = data
         self._build_networkx(data)
         self._build_zone_index()
@@ -529,35 +222,38 @@ class GridGraphService:
             self.graph.number_of_edges(),
         )
 
-    def _build_merged_grid(self) -> Dict[str, Any]:
-        """Build the merged ACTIVSg2000 + Travis 150 grid data."""
-        # ACTIVSg2000
-        case_path = Path(settings.activsg_case_file)
-        aux_path = Path(settings.activsg_aux_file)
-        activsg_data = _build_grid_data(case_path, aux_path)
+    def _fetch_and_merge(self) -> Dict[str, Any]:
+        """Fetch nodes + edges from Supabase and merge with tie lines."""
+        # ACTIVSg2000 nodes
+        logger.info("Fetching ACTIVSg2000 nodes from Supabase grid_nodes table…")
+        activsg_rows = _fetch_all_rows("grid_nodes")
+        activsg_nodes = _rows_to_nodes(activsg_rows)
+        logger.info("Fetched %d ACTIVSg2000 nodes", len(activsg_nodes))
 
-        # Travis 150
-        travis_path = Path(settings.travis150_aux_file)
-        if travis_path.exists():
-            travis_data = _build_travis150_data(travis_path)
+        # Travis 150 nodes
+        logger.info("Fetching Travis 150 nodes from Supabase travis_nodes table…")
+        travis_rows = _fetch_all_rows("travis_nodes")
+        travis_nodes = _rows_to_nodes(travis_rows)
+        logger.info("Fetched %d Travis 150 nodes", len(travis_nodes))
 
-            # Create tie lines
-            tie_lines = _create_tie_lines(activsg_data["nodes"], travis_data["nodes"])
+        # Edges (includes both ACTIVSg2000 and Travis branches)
+        logger.info("Fetching edges from Supabase grid_edges table…")
+        edge_rows = _fetch_all_rows("grid_edges")
+        edges = _rows_to_edges(edge_rows)
+        logger.info("Fetched %d edges", len(edges))
 
-            # Merge
-            merged_nodes = activsg_data["nodes"] + travis_data["nodes"]
-            merged_edges = activsg_data["edges"] + travis_data["edges"] + tie_lines
+        # Create tie lines between Travis and ACTIVSg2000
+        tie_lines = _create_tie_lines(activsg_nodes, travis_nodes)
 
-            logger.info(
-                "Merged grid: %d nodes (%d ACTIVSg + %d Travis), %d edges (%d + %d + %d ties)",
-                len(merged_nodes), len(activsg_data["nodes"]), len(travis_data["nodes"]),
-                len(merged_edges), len(activsg_data["edges"]), len(travis_data["edges"]),
-                len(tie_lines),
-            )
-            return {"nodes": merged_nodes, "edges": merged_edges}
-        else:
-            logger.warning("Travis 150 AUX not found at %s, using ACTIVSg2000 only", travis_path)
-            return activsg_data
+        merged_nodes = activsg_nodes + travis_nodes
+        merged_edges = edges + tie_lines
+
+        logger.info(
+            "Merged grid: %d nodes (%d ACTIVSg + %d Travis), %d edges (%d stored + %d ties)",
+            len(merged_nodes), len(activsg_nodes), len(travis_nodes),
+            len(merged_edges), len(edges), len(tie_lines),
+        )
+        return {"nodes": merged_nodes, "edges": merged_edges}
 
     def _build_networkx(self, data: Dict[str, Any]) -> None:
         g = nx.Graph()

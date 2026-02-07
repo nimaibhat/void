@@ -1,5 +1,5 @@
-"""ERCOT Load Data Service — parses Native_Load_2021.xlsx for actual
-hourly load by weather zone.
+"""ERCOT Load Data Service — reads hourly load by weather zone from
+Supabase ``ercot_load`` table (43 818 rows, 8 zones, 2021-2025).
 
 Provides historical ERCOT load data for the Winter Storm Uri period
 (Feb 14-16, 2021) and normal baseline days.
@@ -8,30 +8,25 @@ Provides historical ERCOT load data for the Winter Storm Uri period
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from pathlib import Path
+from datetime import date
 from typing import Dict, Tuple
 
-import openpyxl
+import requests
 
 from app.config import settings
 
 logger = logging.getLogger("blackout.ercot_data")
 
-# Column name mapping from ERCOT xlsx to our weather zone names
-_COL_TO_ZONE: Dict[str, str] = {
-    "COAST": "Coast",
-    "EAST": "East",
-    "FWEST": "Far West",
-    "FAR_WEST": "Far West",
-    "NORTH": "North",
-    "NCENT": "North Central",
-    "NORTH_C": "North Central",
-    "SOUTH": "Southern",
-    "SOUTHERN": "Southern",
-    "SCENT": "South Central",
-    "SOUTH_C": "South Central",
-    "WEST": "West",
+# Supabase column → ERCOT weather zone name
+_SUPABASE_COL_TO_ZONE: Dict[str, str] = {
+    "coast": "Coast",
+    "east": "East",
+    "far_west": "Far West",
+    "north": "North",
+    "north_central": "North Central",
+    "south": "Southern",
+    "south_central": "South Central",
+    "west": "West",
 }
 
 # Normal baseline date
@@ -47,89 +42,58 @@ class ErcotDataService:
         self.loaded = False
 
     def load(self) -> None:
-        """Parse the ERCOT Native Load xlsx file.
-
-        Format: "Hour Ending" column has combined datetime (e.g. "01/01/2021 01:00"),
-        followed by zone columns (COAST, EAST, FWEST, NORTH, NCENT, SOUTH, SCENT, WEST, ERCOT).
-        """
-        xlsx_path = Path(settings.ercot_load_file)
-        if not xlsx_path.exists():
-            logger.warning("ERCOT load file not found: %s", xlsx_path)
+        """Fetch ERCOT hourly load data from the Supabase ``ercot_load`` table."""
+        url = settings.supabase_url
+        key = settings.supabase_anon_key
+        if not url or not key:
+            logger.warning("Supabase not configured — skipping ERCOT load")
             return
 
-        logger.info("Loading ERCOT load data from %s", xlsx_path)
-        wb = openpyxl.load_workbook(str(xlsx_path), read_only=True, data_only=True)
-        ws = wb.active
+        zone_cols = ",".join(_SUPABASE_COL_TO_ZONE.keys())
+        select = f"year,month,day,hour,{zone_cols}"
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
 
-        # Read header row
-        rows = ws.iter_rows()
-        header_row = next(rows)
-        headers = [str(cell.value).strip() if cell.value else "" for cell in header_row]
-
-        # Find the "Hour Ending" column (combined date+hour)
-        hour_ending_col = None
-        zone_cols: Dict[int, str] = {}
-
-        for i, h in enumerate(headers):
-            h_upper = h.upper().replace(" ", "_")
-            if h_upper in ("HOUR_ENDING", "HOURENDING"):
-                hour_ending_col = i
-            else:
-                for col_key, zone_name in _COL_TO_ZONE.items():
-                    if h_upper == col_key:
-                        zone_cols[i] = zone_name
-                        break
-
-        if hour_ending_col is None:
-            logger.error("Could not find 'Hour Ending' column. Headers: %s", headers)
-            wb.close()
-            return
-
-        logger.info("Found %d zone columns: %s", len(zone_cols),
-                     {headers[i]: z for i, z in zone_cols.items()})
-
+        # Paginate — PostgREST default limit is 1000
+        page_size = 5000
+        offset = 0
         count = 0
-        for row in rows:
-            try:
-                he_val = row[hour_ending_col].value
-                if he_val is None:
+
+        logger.info("Loading ERCOT load data from Supabase ercot_load table…")
+
+        while True:
+            api_url = (
+                f"{url}/rest/v1/ercot_load"
+                f"?select={select}&order=id&limit={page_size}&offset={offset}"
+            )
+            resp = requests.get(api_url, headers=headers, timeout=30)
+            if not resp.ok:
+                logger.error("Supabase ercot_load fetch failed (%s): %s", resp.status_code, resp.text[:200])
+                break
+
+            rows = resp.json()
+            if not rows:
+                break
+
+            for row in rows:
+                try:
+                    d = date(int(row["year"]), int(row["month"]), int(row["day"]))
+                    hour = int(row["hour"])
+                    zone_loads: Dict[str, float] = {}
+                    for col, zone_name in _SUPABASE_COL_TO_ZONE.items():
+                        val = row.get(col)
+                        if val is not None:
+                            zone_loads[zone_name] = float(val)
+                    self._data[(d, hour)] = zone_loads
+                    count += 1
+                except (ValueError, TypeError, KeyError):
                     continue
 
-                # Parse combined datetime from "Hour Ending" column
-                if isinstance(he_val, datetime):
-                    dt = he_val
-                elif isinstance(he_val, str):
-                    # Format: "MM/DD/YYYY HH:MM"
-                    he_val = he_val.strip()
-                    dt = datetime.strptime(he_val, "%m/%d/%Y %H:%M")
-                else:
-                    continue
+            offset += page_size
+            if len(rows) < page_size:
+                break
 
-                d = dt.date()
-                # Hour Ending: 01:00 means hour 0 (midnight-1am), 24:00 means hour 23
-                hour = dt.hour
-                if hour == 0:
-                    # "24:00" would parse as next day 00:00, adjust back
-                    hour = 23
-                else:
-                    hour = hour - 1
-
-                # Read zone loads
-                zone_loads: Dict[str, float] = {}
-                for col_idx, zone_name in zone_cols.items():
-                    val = row[col_idx].value
-                    if val is not None:
-                        zone_loads[zone_name] = float(val)
-
-                self._data[(d, hour)] = zone_loads
-                count += 1
-
-            except (ValueError, TypeError, IndexError):
-                continue
-
-        wb.close()
-        self.loaded = True
-        logger.info("Loaded %d hourly ERCOT load records", count)
+        self.loaded = count > 0
+        logger.info("Loaded %d hourly ERCOT load records from Supabase", count)
 
     def get_zone_loads(self, target_date: date, hour: int) -> Dict[str, float]:
         """Get load per ERCOT weather zone for a specific date and hour.
