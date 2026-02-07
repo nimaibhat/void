@@ -9,6 +9,7 @@ import {
   type SmartDevice,
   type AlertAction,
 } from "@/lib/priceAlerts";
+import { enhanceAlertsWithClaude, summarizePrices } from "@/lib/claude-alerts";
 import { controlCharging, controlHvac } from "@/lib/enode";
 import { sendPushNotification, getBaseUrl } from "@/lib/notify";
 
@@ -35,7 +36,7 @@ function getActionsStore(): Map<string, AlertAction> {
 /* ------------------------------------------------------------------ */
 export async function GET(req: NextRequest) {
   const profileId = req.nextUrl.searchParams.get("profileId");
-  const scenario = req.nextUrl.searchParams.get("scenario") ?? "normal";
+  const scenario = req.nextUrl.searchParams.get("scenario") ?? "live";
 
   let devices: SmartDevice[] = [];
   let region = "ERCOT";
@@ -67,6 +68,14 @@ export async function GET(req: NextRequest) {
 
   const result = await generatePriceAlerts(devices, region, scenario);
 
+  // Enhance alert text with Claude (falls back to rule-based on error/timeout)
+  const priceSummary = summarizePrices(result.prices);
+  const enhancedAlerts = await enhanceAlertsWithClaude(
+    result.alerts,
+    priceSummary,
+    result.ruleAnalysis
+  );
+
   // Store actions so POST can look them up
   const store = getActionsStore();
   for (const action of result.actions) {
@@ -75,7 +84,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    alerts: result.alerts,
+    alerts: enhancedAlerts,
     prices: result.prices,
     actionCount: result.actions.length,
   });

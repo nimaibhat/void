@@ -26,56 +26,6 @@ interface AlertsPanelProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Defaults                                                           */
-/* ------------------------------------------------------------------ */
-const DEFAULT_ALERTS: AlertData[] = [
-  {
-    id: "1",
-    severity: "critical",
-    title: "Ice Storm Warning — Austin Metro",
-    description:
-      "ERCOT grid stress expected Tue 2/10. Cascade risk moderate. Your home is pre-positioned for resilience.",
-    timestamp: "now",
-    action: { label: "View Details →", variant: "primary" },
-  },
-  {
-    id: "2",
-    severity: "optimization",
-    title: "Pre-cooling Activated",
-    description:
-      "Thermostat lowers to 68°F at 3:00 PM to bank thermal energy before price spike. Saves $3.40.",
-    timestamp: "2m ago",
-    action: { label: "Adjust →", variant: "secondary" },
-  },
-  {
-    id: "3",
-    severity: "optimization",
-    title: "EV Charge Shifted to 2:00 AM",
-    description:
-      "Charge moved from 6 PM ($0.18/kWh) to 2 AM (-$0.02/kWh). You'll earn $0.34.",
-    timestamp: "5m ago",
-    action: { label: "Undo", variant: "secondary" },
-  },
-  {
-    id: "4",
-    severity: "warning",
-    title: "Extreme Heat — TX South",
-    description:
-      "SEV 4 heat event in southern Texas. Austin on the boundary. Monitoring for grid impact.",
-    timestamp: "15m ago",
-    action: { label: "Dismiss", variant: "secondary" },
-  },
-  {
-    id: "5",
-    severity: "resolved",
-    title: "Battery Reserve Configured",
-    description:
-      "Powerwall reserve set to 30% for storm backup. Excess discharges during peak pricing.",
-    timestamp: "1h ago",
-  },
-];
-
-/* ------------------------------------------------------------------ */
 /*  Severity config                                                    */
 /* ------------------------------------------------------------------ */
 const SEVERITY_CONFIG: Record<
@@ -203,7 +153,7 @@ function AlertCard({
 /* ------------------------------------------------------------------ */
 /*  AlertsPanel                                                        */
 /* ------------------------------------------------------------------ */
-export default function AlertsPanel({ alerts = DEFAULT_ALERTS, onAction }: AlertsPanelProps) {
+export default function AlertsPanel({ alerts = [], onAction }: AlertsPanelProps) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const filtered = filterAlerts(alerts, activeFilter);
 

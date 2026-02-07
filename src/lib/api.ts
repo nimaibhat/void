@@ -240,7 +240,7 @@ export interface ConsumerRecommendation {
 export async function fetchRecommendations(
   profileId: string,
   region = "ERCOT",
-  scenario = "normal"
+  scenario = "live"
 ): Promise<ConsumerRecommendation> {
   const res = await get<{ data: ConsumerRecommendation }>(
     `/consumer/recommendations/${profileId}?region=${region}&scenario=${scenario}`

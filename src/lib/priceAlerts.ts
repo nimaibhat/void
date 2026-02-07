@@ -12,6 +12,7 @@
 import type { AlertData } from "@/components/AlertsPanel";
 import type { HourlyPrice } from "@/lib/api";
 import { fetchPrices } from "@/lib/api";
+import type { RuleAnalysisItem } from "@/lib/claude-alerts";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -155,10 +156,11 @@ function nextAlertId(): string {
 function evChargerAlerts(
   prices: HourlyPrice[],
   device: SmartDevice
-): { alert: AlertData; action: AlertAction }[] {
-  const alerts: { alert: AlertData; action: AlertAction }[] = [];
+): { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] {
+  const alerts: { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] = [];
   const now = currentPrice(prices);
   const cheapest = findCheapestWindow(prices, EV_CHARGE_HOURS);
+  const peak = findPeakWindow(prices, EV_CHARGE_HOURS);
   if (!cheapest) return alerts;
 
   // Only generate if there's meaningful savings
@@ -183,6 +185,17 @@ function evChargerAlerts(
         actionType: "shift_charge",
         params: { startHour: cheapest.startHour, endHour: cheapest.endHour },
       },
+      analysis: {
+        alertId: id,
+        deviceType: "ev_charger",
+        deviceName: device.name,
+        actionType: "shift_charge",
+        savingsDollars: totalSavings,
+        currentPriceKwh: now,
+        optimalPriceKwh: cheapest.avgPrice,
+        optimalWindowLabel: cheapest.label,
+        peakWindowLabel: peak?.label ?? "",
+      },
     });
   } else if (totalSavings > 0.2) {
     const id = nextAlertId();
@@ -202,6 +215,17 @@ function evChargerAlerts(
         actionType: "shift_charge",
         params: { startHour: cheapest.startHour, endHour: cheapest.endHour },
       },
+      analysis: {
+        alertId: id,
+        deviceType: "ev_charger",
+        deviceName: device.name,
+        actionType: "shift_charge",
+        savingsDollars: totalSavings,
+        currentPriceKwh: now,
+        optimalPriceKwh: cheapest.avgPrice,
+        optimalWindowLabel: cheapest.label,
+        peakWindowLabel: peak?.label ?? "",
+      },
     });
   }
 
@@ -211,8 +235,8 @@ function evChargerAlerts(
 function thermostatAlerts(
   prices: HourlyPrice[],
   device: SmartDevice
-): { alert: AlertData; action: AlertAction }[] {
-  const alerts: { alert: AlertData; action: AlertAction }[] = [];
+): { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] {
+  const alerts: { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] = [];
   const now = currentPrice(prices);
   const peak = findPeakWindow(prices, 3);
   const cheapest = findCheapestWindow(prices, 2);
@@ -241,6 +265,17 @@ function thermostatAlerts(
           actionType: "pre_cool",
           params: { targetTemp: 70 },
         },
+        analysis: {
+          alertId: id,
+          deviceType: "thermostat",
+          deviceName: device.name,
+          actionType: "pre_cool",
+          savingsDollars: totalSavings,
+          currentPriceKwh: now,
+          optimalPriceKwh: cheapest.avgPrice,
+          optimalWindowLabel: cheapest.label,
+          peakWindowLabel: peak.label,
+        },
       });
     }
   }
@@ -266,6 +301,17 @@ function thermostatAlerts(
           actionType: "raise_setpoint",
           params: { deltaF: 3 },
         },
+        analysis: {
+          alertId: id,
+          deviceType: "thermostat",
+          deviceName: device.name,
+          actionType: "raise_setpoint",
+          savingsDollars: savings,
+          currentPriceKwh: now,
+          optimalPriceKwh: 0.12,
+          optimalWindowLabel: "off-peak",
+          peakWindowLabel: peak.label,
+        },
       });
     }
   }
@@ -276,8 +322,8 @@ function thermostatAlerts(
 function batteryAlerts(
   prices: HourlyPrice[],
   device: SmartDevice
-): { alert: AlertData; action: AlertAction }[] {
-  const alerts: { alert: AlertData; action: AlertAction }[] = [];
+): { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] {
+  const alerts: { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] = [];
   const valley = findCheapestWindow(prices, 3);
   const peak = findPeakWindow(prices, 3);
   if (!valley || !peak) return alerts;
@@ -309,6 +355,17 @@ function batteryAlerts(
           dischargeWindow: { start: peak.startHour, end: peak.endHour },
         },
       },
+      analysis: {
+        alertId: id,
+        deviceType: "battery",
+        deviceName: device.name,
+        actionType: "charge_battery",
+        savingsDollars: arbitrage,
+        currentPriceKwh: currentPrice(prices),
+        optimalPriceKwh: valley.avgPrice,
+        optimalWindowLabel: valley.label,
+        peakWindowLabel: peak.label,
+      },
     });
   }
 
@@ -319,10 +376,11 @@ function shiftableApplianceAlerts(
   prices: HourlyPrice[],
   device: SmartDevice,
   powerKw: number
-): { alert: AlertData; action: AlertAction }[] {
-  const alerts: { alert: AlertData; action: AlertAction }[] = [];
+): { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] {
+  const alerts: { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] = [];
   const now = currentPrice(prices);
   const cheapest = findCheapestWindow(prices, 2);
+  const peak = findPeakWindow(prices, 2);
   if (!cheapest) return alerts;
 
   const savings = (now - cheapest.avgPrice) * powerKw * 2;
@@ -343,6 +401,17 @@ function shiftableApplianceAlerts(
         deviceName: device.name,
         actionType: "shift_appliance",
         params: { startHour: cheapest.startHour, endHour: cheapest.endHour },
+      },
+      analysis: {
+        alertId: id,
+        deviceType: device.type,
+        deviceName: device.name,
+        actionType: "shift_appliance",
+        savingsDollars: savings,
+        currentPriceKwh: now,
+        optimalPriceKwh: cheapest.avgPrice,
+        optimalWindowLabel: cheapest.label,
+        peakWindowLabel: peak?.label ?? "",
       },
     });
   }
@@ -406,6 +475,7 @@ export interface GeneratedAlerts {
   alerts: AlertData[];
   actions: AlertAction[];
   prices: HourlyPrice[];
+  ruleAnalysis: RuleAnalysisItem[];
 }
 
 /**
@@ -429,15 +499,16 @@ export async function generatePriceAlerts(
     prices = await fetchPrices(region, scenario);
   } catch {
     // Backend unavailable — return empty
-    return { alerts: [], actions: [], prices: [] };
+    return { alerts: [], actions: [], prices: [], ruleAnalysis: [] };
   }
 
   if (!prices.length) {
-    return { alerts: [], actions: [], prices };
+    return { alerts: [], actions: [], prices, ruleAnalysis: [] };
   }
 
   const allAlerts: AlertData[] = [];
   const allActions: AlertAction[] = [];
+  const allAnalysis: RuleAnalysisItem[] = [];
 
   // Spike warning (global, not per-device)
   const spike = spikeWarning(prices);
@@ -452,7 +523,7 @@ export async function generatePriceAlerts(
 
   // Per-device alerts
   for (const device of devices) {
-    let results: { alert: AlertData; action: AlertAction }[] = [];
+    let results: { alert: AlertData; action: AlertAction; analysis: RuleAnalysisItem }[] = [];
 
     switch (device.type) {
       case "ev_charger":
@@ -478,8 +549,9 @@ export async function generatePriceAlerts(
     for (const r of results) {
       allAlerts.push(r.alert);
       allActions.push(r.action);
+      allAnalysis.push(r.analysis);
     }
   }
 
-  return { alerts: allAlerts, actions: allActions, prices };
+  return { alerts: allAlerts, actions: allActions, prices, ruleAnalysis: allAnalysis };
 }

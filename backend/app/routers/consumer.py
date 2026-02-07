@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/consumer", tags=["consumer"])
 async def recommendations(
     profile_id: str,
     region: str = Query(default="ERCOT", examples=["ERCOT"]),
-    scenario: str = Query(default="normal", examples=["uri_2021"]),
+    scenario: str = Query(default="live", examples=["live", "uri", "normal"]),
 ) -> SuccessResponse[ConsumerRecommendation]:
     """Optimized appliance schedule, battery/solar savings, readiness score."""
     data = await consumer_service.get_recommendations(
@@ -38,7 +38,7 @@ async def recommendations(
 async def savings(
     profile_id: str,
     region: str = Query(default="ERCOT", examples=["ERCOT"]),
-    scenario: str = Query(default="normal", examples=["uri_2021"]),
+    scenario: str = Query(default="live", examples=["live", "uri", "normal"]),
 ) -> SuccessResponse[SavingsSummary]:
     """Savings summary — total dollars/kWh saved, readiness, status."""
     data = await consumer_service.get_savings(

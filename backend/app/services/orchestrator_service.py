@@ -25,6 +25,7 @@ from app.services.crew_dispatch_service import (
 from app.services.demand_service import compute_demand_multipliers
 from app.services.grid_graph_service import grid_graph
 from app.services.price_service import price_service
+from app.services.claude_service import enhance_alerts
 from app.services.utility_service import get_crews
 
 logger = logging.getLogger("blackout.orchestrator")
@@ -232,6 +233,9 @@ def run_orchestrated_simulation(
                 "total_load_shed_mw": cascade_result["total_load_shed_mw"],
             },
         })
+
+    # Enhance alert text with Claude (falls back to originals on error)
+    alerts = enhance_alerts(alerts)
 
     _insert_alerts(alerts)
     _update_session(session_id, {

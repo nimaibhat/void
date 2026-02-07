@@ -35,103 +35,16 @@ from app.services.price_service import price_service
 
 logger = logging.getLogger("blackout.consumer")
 
-# ── Built-in profiles ────────────────────────────────────────────────
+# ── Appliance / battery / solar defaults for dynamic profiles ────────
 
-PROFILES: Dict[str, ConsumerProfile] = {
-    "martinez-family": ConsumerProfile(
-        profile_id="martinez-family",
-        name="Martinez Family",
-        profile_type=ProfileType.PRE_MADE,
-        household_size=5,
-        square_footage=2400,
-        has_solar=True,
-        has_battery=True,
-        has_ev=False,
-        hvac_type="central_ac",
-        avg_monthly_kwh=1100.0,
-    ),
-    "default-suburban-family": ConsumerProfile(
-        profile_id="default-suburban-family",
-        name="Suburban Family",
-        profile_type=ProfileType.PRE_MADE,
-        household_size=4,
-        square_footage=2200,
-        has_solar=False,
-        has_battery=False,
-        has_ev=False,
-        hvac_type="central_ac",
-        avg_monthly_kwh=950.0,
-    ),
-    "default-eco-home": ConsumerProfile(
-        profile_id="default-eco-home",
-        name="Eco-Conscious Home",
-        profile_type=ProfileType.PRE_MADE,
-        household_size=2,
-        square_footage=1600,
-        has_solar=True,
-        has_battery=True,
-        has_ev=True,
-        hvac_type="heat_pump",
-        avg_monthly_kwh=400.0,
-    ),
-    "default-apartment": ConsumerProfile(
-        profile_id="default-apartment",
-        name="Urban Apartment",
-        profile_type=ProfileType.PRE_MADE,
-        household_size=1,
-        square_footage=750,
-        has_solar=False,
-        has_battery=False,
-        has_ev=False,
-        hvac_type="window_unit",
-        avg_monthly_kwh=550.0,
-    ),
-}
-
-# ── Appliance templates per profile ──────────────────────────────────
-
-PROFILE_APPLIANCES: Dict[str, List[Appliance]] = {
-    "martinez-family": [
-        Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
-                  preferred_start=19, category=ActionCategory.APPLIANCE),
-        Appliance(name="Clothes Dryer", power_kw=5.0, duration_hours=1.0,
-                  preferred_start=10, category=ActionCategory.APPLIANCE),
-        Appliance(name="Water Heater", power_kw=4.5, duration_hours=1.0,
-                  preferred_start=7, category=ActionCategory.APPLIANCE),
-    ],
-    "default-suburban-family": [
-        Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
-                  preferred_start=19, category=ActionCategory.APPLIANCE),
-        Appliance(name="Clothes Dryer", power_kw=5.0, duration_hours=1.0,
-                  preferred_start=10, category=ActionCategory.APPLIANCE),
-        Appliance(name="Water Heater", power_kw=4.5, duration_hours=1.0,
-                  preferred_start=7, category=ActionCategory.APPLIANCE),
-    ],
-    "default-eco-home": [
-        Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
-                  preferred_start=20, category=ActionCategory.APPLIANCE),
-        Appliance(name="EV Charger", power_kw=7.2, duration_hours=3.0,
-                  preferred_start=18, category=ActionCategory.EV),
-    ],
-    "default-apartment": [
-        Appliance(name="Dishwasher", power_kw=1.2, duration_hours=1.5,
-                  preferred_start=20, category=ActionCategory.APPLIANCE),
-    ],
-}
-
-# ── Battery specs: (capacity_kwh, charge_rate_kw) ────────────────────
-
-BATTERY_SPECS: Dict[str, Tuple[float, float]] = {
-    "martinez-family": (13.5, 5.0),
-    "default-eco-home": (13.5, 5.0),
-}
-
-# ── Solar specs: (panel_kw_peak, efficiency) ─────────────────────────
-
-SOLAR_SPECS: Dict[str, Tuple[float, float]] = {
-    "martinez-family": (7.5, 0.85),
-    "default-eco-home": (8.0, 0.85),
-}
+_DEFAULT_APPLIANCES: List[Appliance] = [
+    Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
+              preferred_start=19, category=ActionCategory.APPLIANCE),
+    Appliance(name="Water Heater", power_kw=4.5, duration_hours=1.0,
+              preferred_start=7, category=ActionCategory.APPLIANCE),
+]
+_DEFAULT_BATTERY_SPEC: Tuple[float, float] = (13.5, 5.0)
+_DEFAULT_SOLAR_SPEC: Tuple[float, float] = (7.5, 0.85)
 
 # Normalized solar production curve (fraction of peak kW by hour)
 SOLAR_CURVE: Dict[int, float] = {
@@ -186,17 +99,42 @@ def _fetch_profile_from_supabase(profile_id: str) -> Optional[ConsumerProfile]:
 
 
 def _get_profile(profile_id: str) -> Optional[ConsumerProfile]:
-    """Look up a profile by ID (built-in, custom, or Supabase)."""
-    return (
-        PROFILES.get(profile_id)
-        or _custom_profiles.get(profile_id)
-        or _fetch_profile_from_supabase(profile_id)
-    )
+    """Look up a profile by ID (cached or Supabase)."""
+    return _custom_profiles.get(profile_id) or _fetch_profile_from_supabase(profile_id)
 
 
 async def get_profiles() -> ConsumerProfilesResponse:
-    """List all available consumer profiles."""
-    all_profiles = list(PROFILES.values()) + list(_custom_profiles.values())
+    """List all available consumer profiles (from Supabase + in-memory)."""
+    # Fetch all from Supabase
+    supabase_profiles: List[ConsumerProfile] = []
+    url = settings.supabase_url
+    key = settings.supabase_anon_key
+    if url and key:
+        try:
+            resp = requests.get(
+                f"{url}/rest/v1/consumer_profiles",
+                params={"select": "*", "order": "name"},
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            for row in resp.json():
+                supabase_profiles.append(ConsumerProfile(
+                    profile_id=row["id"],
+                    name=row.get("name", "Unknown"),
+                    profile_type=ProfileType.PRE_MADE,
+                    household_size=row.get("household_size") or 3,
+                    square_footage=row.get("square_footage") or 1500,
+                    has_solar=row.get("has_solar", False),
+                    has_battery=row.get("has_battery", False),
+                    has_ev=row.get("has_ev", False),
+                    hvac_type=row.get("hvac_type") or "central_ac",
+                    avg_monthly_kwh=float(row.get("avg_monthly_kwh") or 800),
+                ))
+        except Exception as exc:
+            logger.warning("Failed to list profiles from Supabase: %s", exc)
+
+    all_profiles = supabase_profiles + list(_custom_profiles.values())
     return ConsumerProfilesResponse(profiles=all_profiles, total=len(all_profiles))
 
 
@@ -250,21 +188,13 @@ def _optimize_appliances(
     prices: List[HourlyPrice],
 ) -> List[OptimizedSchedule]:
     """Find cheapest run window for each flexible appliance."""
-    appliances = PROFILE_APPLIANCES.get(profile_id)
-    if appliances is None:
-        # Dynamic Supabase profile — use generic appliance set
-        profile = _custom_profiles.get(profile_id)
-        appliances = [
-            Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
-                      preferred_start=19, category=ActionCategory.APPLIANCE),
-            Appliance(name="Water Heater", power_kw=4.5, duration_hours=1.0,
-                      preferred_start=7, category=ActionCategory.APPLIANCE),
-        ]
-        if profile and profile.has_ev:
-            appliances.append(
-                Appliance(name="EV Charger", power_kw=7.2, duration_hours=3.0,
-                          preferred_start=18, category=ActionCategory.EV)
-            )
+    profile = _custom_profiles.get(profile_id)
+    appliances = list(_DEFAULT_APPLIANCES)
+    if profile and profile.has_ev:
+        appliances.append(
+            Appliance(name="EV Charger", power_kw=7.2, duration_hours=3.0,
+                      preferred_start=18, category=ActionCategory.EV)
+        )
     schedule: List[OptimizedSchedule] = []
 
     for app in appliances:
@@ -318,14 +248,11 @@ def _optimize_battery(
 
     Returns (savings_dollars, savings_kwh).
     """
-    spec = BATTERY_SPECS.get(profile_id)
-    if spec is None:
-        # Dynamic profiles from Supabase: use default battery if profile has one
-        profile = _custom_profiles.get(profile_id)
-        if profile and profile.has_battery:
-            spec = (13.5, 5.0)
-        else:
-            return 0.0, 0.0
+    profile = _custom_profiles.get(profile_id)
+    if profile and profile.has_battery:
+        spec = _DEFAULT_BATTERY_SPEC
+    else:
+        return 0.0, 0.0
 
     capacity_kwh, charge_rate_kw = spec
     charge_hours = int(math.ceil(capacity_kwh / charge_rate_kw))
@@ -361,14 +288,11 @@ def _calculate_solar_savings(
 
     Returns (savings_dollars, production_kwh).
     """
-    spec = SOLAR_SPECS.get(profile_id)
-    if spec is None:
-        # Dynamic profiles from Supabase: use default solar if profile has it
-        profile = _custom_profiles.get(profile_id)
-        if profile and profile.has_solar:
-            spec = (7.5, 0.85)
-        else:
-            return 0.0, 0.0
+    profile = _custom_profiles.get(profile_id)
+    if profile and profile.has_solar:
+        spec = _DEFAULT_SOLAR_SPEC
+    else:
+        return 0.0, 0.0
 
     panel_kw, efficiency = spec
     total_savings = 0.0
@@ -513,7 +437,7 @@ def _find_next_risk_window(prices: List[HourlyPrice]) -> Optional[str]:
 async def get_recommendations(
     profile_id: str,
     region: str = "ERCOT",
-    scenario: str = "normal",
+    scenario: str = "live",
 ) -> ConsumerRecommendation:
     """Full optimization pipeline: prices → appliances → battery → solar."""
     profile = _get_profile(profile_id)
@@ -576,7 +500,7 @@ async def get_recommendations(
 async def get_savings(
     profile_id: str,
     region: str = "ERCOT",
-    scenario: str = "normal",
+    scenario: str = "live",
 ) -> SavingsSummary:
     """Compute savings summary for a profile."""
     rec = await get_recommendations(profile_id, region, scenario)
