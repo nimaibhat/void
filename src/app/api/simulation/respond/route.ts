@@ -92,14 +92,15 @@ export async function POST(req: NextRequest) {
           amount: payoutAmount.toFixed(2),
         });
 
-        payoutResult = checkAndRecordPayout(hh.id, txResult.hash);
+        const txHash = ((txResult.result as unknown) as Record<string, unknown>).hash as string ?? "";
+        payoutResult = checkAndRecordPayout(hh.id, txHash);
 
         // Send payout notification
         await sendPushNotification({
           title: "💰 RLUSD Payout Sent!",
           message:
             `$${payoutAmount.toFixed(2)} RLUSD → your wallet!\n` +
-            `TX: ${txResult.hash.slice(0, 16)}…\n` +
+            `TX: ${txHash.slice(0, 16)}…\n` +
             `Total earned: $${hh.savingsUSD_paid.toFixed(2)} RLUSD`,
           priority: 4,
           tags: ["moneybag", "rocket"],

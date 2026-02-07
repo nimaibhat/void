@@ -3,17 +3,9 @@
  *
  * One-time setup for XRPL integration:
  *   1. { action: "fund" }        — Create & fund a Testnet wallet via faucet
-<<<<<<< HEAD
  *   2. { action: "link", householdId, address, seed } — Link wallet to household
  *   3. { action: "trustline", householdId } — Create RLUSD trust line
  *   4. { action: "info" } — Get program wallet info
-=======
- *   2. { action: "trustline" }   — Create RLUSD trust line from user → issuer
- *   3. { action: "link", householdId, address, seed } — Link wallet to household
- *
- * This follows the XRPL "Get Started Using JavaScript" tutorial flow:
- *   fund account → create trust line → ready to receive issued currency.
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -118,13 +110,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           programWallet: wallet.address,
           issuer: getIssuerAddress(),
-<<<<<<< HEAD
-          rpcUrl:
-            process.env.XRPL_RPC_URL ??
-            "wss://s.altnet.rippletest.net:51233",
-=======
           rpcUrl: process.env.XRPL_RPC_URL ?? "wss://s.altnet.rippletest.net:51233",
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
         });
       } catch (err) {
         return NextResponse.json({

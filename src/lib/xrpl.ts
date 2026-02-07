@@ -22,14 +22,6 @@ import * as xrpl from "xrpl";
 /*  Connection                                                         */
 /* ------------------------------------------------------------------ */
 
-<<<<<<< HEAD
-const RPC_URLS = [
-  process.env.XRPL_RPC_URL,               // User-defined first
-  "wss://testnet.xrpl-labs.com",           // Preferred fallback
-  "wss://s.altnet.rippletest.net:51233",   // Official Testnet
-  "wss://xrpl-testnet.onrender.com",       // Community mirror
-].filter(Boolean) as string[];
-=======
 /**
  * Testnet RPC servers — we try the env var first, then fall back through
  * several public Testnet endpoints in case one is slow or unreachable.
@@ -38,32 +30,22 @@ const RPC_URLS: string[] = [
   process.env.XRPL_RPC_URL ?? "",
   "wss://testnet.xrpl-labs.com",
   "wss://s.altnet.rippletest.net:51233",
+  "wss://xrpl-testnet.onrender.com",
 ].filter(Boolean);
 
 const CONNECTION_TIMEOUT_MS = 15_000; // 15 seconds (default is 5s)
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g = globalThis as any;
 const CLIENT_KEY = "__blackout_xrpl_client__";
 
-<<<<<<< HEAD
-/** Get (or create) a persistent XRPL client. */
-=======
 /** Get (or create) a persistent XRPL client, trying multiple servers. */
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
 export async function getClient(): Promise<xrpl.Client> {
   if (g[CLIENT_KEY] && (g[CLIENT_KEY] as xrpl.Client).isConnected()) {
     return g[CLIENT_KEY];
   }
 
   let lastError: Error | null = null;
-<<<<<<< HEAD
-  for (const url of RPC_URLS) {
-    console.log(`[XRPL] Trying to connect to ${url}...`);
-    try {
-      const client = new xrpl.Client(url, { connectionTimeout: 15000 });
-=======
 
   for (const url of RPC_URLS) {
     try {
@@ -71,7 +53,6 @@ export async function getClient(): Promise<xrpl.Client> {
       const client = new xrpl.Client(url, {
         connectionTimeout: CONNECTION_TIMEOUT_MS,
       });
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
       await client.connect();
       console.log(`[XRPL] ✓ Connected to ${url}`);
       g[CLIENT_KEY] = client;
@@ -102,11 +83,7 @@ export async function disconnectClient() {
 }
 
 /* ------------------------------------------------------------------ */
-<<<<<<< HEAD
 /*  Program Wallet (Issuer)                                            */
-=======
-/*  Wallets                                                            */
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
 /* ------------------------------------------------------------------ */
 
 /**
@@ -118,11 +95,7 @@ const CURRENCY_CODE = "524C555344000000000000000000000000000000";
 /** Human-readable name for display */
 export const CURRENCY_DISPLAY = "RLUSD";
 
-<<<<<<< HEAD
 /** Get the program wallet (issuer) from environment variables. */
-=======
-/** Get the program (issuer) wallet from env. */
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
 export function getProgramWallet(): xrpl.Wallet {
   const seed = process.env.XRPL_SEED;
   if (!seed) throw new Error("XRPL_SEED not set in environment variables.");
@@ -142,7 +115,6 @@ export function getIssuerAddress(): string {
  * Returns { wallet, balance } with the funded wallet.
  */
 export async function fundTestnetWallet(): Promise<{
-<<<<<<< HEAD
   address: string;
   seed: string;
   balance: number;
@@ -153,32 +125,10 @@ export async function fundTestnetWallet(): Promise<{
     address: fundResult.wallet.address,
     seed: fundResult.wallet.seed!,
     balance: fundResult.balance,
-=======
-  wallet: xrpl.Wallet;
-  address: string;
-  seed: string;
-  balance: string;
-}> {
-  const client = await getClient();
-  const fundResult = await client.fundWallet();
-  const wallet = fundResult.wallet;
-  return {
-    wallet,
-    address: wallet.address,
-    seed: wallet.seed!,
-    balance: String(fundResult.balance),
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
   };
 }
 
 /* ------------------------------------------------------------------ */
-<<<<<<< HEAD
-/*  Trust Line                                                          */
-/* ------------------------------------------------------------------ */
-
-/**
- * Create a TrustLine for RLUSD from a user wallet to the program issuer.
-=======
 /*  Trust Line                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -187,7 +137,6 @@ export async function fundTestnetWallet(): Promise<{
  * for the RLUSD token.
  *
  * This is step 1 before the user can receive RLUSD payouts.
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
  * Follows the XRPL "TrustSet" transaction pattern.
  */
 export async function createRLUSDTrustLine(
@@ -221,29 +170,12 @@ export async function createRLUSDTrustLine(
 
 /**
  * Send RLUSD from the program wallet (issuer) to a destination address.
-<<<<<<< HEAD
  * This is the core payout function.
-=======
- *
- * This is the "send issued currency" pattern from XRPL docs:
- *   TransactionType: Payment
- *   Amount: { currency: "RLUSD", value: "5.00", issuer: <program address> }
- *   Destination: <user address>
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
  */
 export async function sendRLUSDPayout(opts: {
   destination: string;
   amount: string;
-<<<<<<< HEAD
 }): Promise<xrpl.TxResponse> {
-=======
-}): Promise<{
-  hash: string;
-  result: string;
-  amount: string;
-  destination: string;
-}> {
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
   const client = await getClient();
   const wallet = getProgramWallet();
   const issuer = getIssuerAddress();
@@ -269,7 +201,6 @@ export async function sendRLUSDPayout(opts: {
       ? (meta as { TransactionResult: string }).TransactionResult
       : "unknown";
 
-<<<<<<< HEAD
   if (txResult !== "tesSUCCESS") {
     throw new Error(`XRPL payment failed: ${txResult}`);
   }
@@ -279,18 +210,6 @@ export async function sendRLUSDPayout(opts: {
 
 /* ------------------------------------------------------------------ */
 /*  Queries                                                            */
-=======
-  return {
-    hash: result.result.hash,
-    result: txResult,
-    amount: opts.amount,
-    destination: opts.destination,
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Balance Check                                                      */
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
 /* ------------------------------------------------------------------ */
 
 /**
@@ -327,7 +246,7 @@ export async function getXRPBalance(address: string): Promise<string> {
       command: "account_info",
       account: address,
     });
-    return xrpl.dropsToXrp(response.result.account_data.Balance);
+    return String(xrpl.dropsToXrp(response.result.account_data.Balance));
   } catch {
     return "0";
   }
@@ -373,7 +292,6 @@ export async function getRecentTransactions(
       .map((tx) => {
         const t = tx.tx_json!;
         const amt = t.Amount as xrpl.IssuedCurrencyAmount;
-<<<<<<< HEAD
         return {
           hash: tx.hash ?? t.hash ?? "unknown",
           type: "Payment",
@@ -387,19 +305,6 @@ export async function getRecentTransactions(
       });
   } catch (e) {
     console.error("[XRPL] Failed to fetch transactions:", e);
-=======
-        const closeTime = tx.close_time_iso ?? "";
-        return {
-          hash: tx.hash ?? "",
-          type: t.Account === address ? "SENT" : "RECEIVED",
-          amount: amt.value,
-          from: t.Account ?? "",
-          to: (t as xrpl.Payment).Destination ?? "",
-          timestamp: closeTime,
-        };
-      });
-  } catch {
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
     return [];
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 
@@ -12,6 +12,18 @@ import { motion } from "framer-motion";
  * and shows a confirmation screen.
  */
 export default function RespondPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center p-6">
+        <div className="w-16 h-16 rounded-full border-2 border-[#22c55e]/30 border-t-[#22c55e] mx-auto animate-spin" />
+      </main>
+    }>
+      <RespondContent />
+    </Suspense>
+  );
+}
+
+function RespondContent() {
   const params = useSearchParams();
   const recId = params.get("id");
   const action = params.get("action"); // "ACCEPT" or "DECLINE"

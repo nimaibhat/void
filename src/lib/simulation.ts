@@ -326,7 +326,7 @@ export function linkRealDevice(
 
 /**
  * Trigger a scenario.
- * Returns the event + Martinez's recommendation.
+ * Returns the event + recommendations for all households.
  */
 export function triggerGridEvent(eventType: EventType): {
   event: GridEvent;
@@ -357,19 +357,11 @@ export function triggerGridEvent(eventType: EventType): {
     // Simulates the household returning to normal between DR events.
     // This prevents the thermostat from getting stuck at 15°C floor.
     const recoveryStep = Math.round(
-<<<<<<< HEAD
-      (COMFORTABLE_BASELINE - hh.hvac.setpoint) * 0.7
+      (COMFORTABLE_BASELINE - hh.hvac.setpoint) * 0.7 // recover 70% of the gap
     );
     if (recoveryStep !== 0) {
       hh.hvac.setpoint += recoveryStep;
-      hh.hvac.currentTemp += Math.round(recoveryStep * 0.5);
-=======
-      (COMFORTABLE_BASELINE - hh.hvac.setpoint) * 0.7          // recover 70% of the gap
-    );
-    if (recoveryStep !== 0) {
-      hh.hvac.setpoint += recoveryStep;
-      hh.hvac.currentTemp += Math.round(recoveryStep * 0.5);   // temp follows partially
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
+      hh.hvac.currentTemp += Math.round(recoveryStep * 0.5); // temp follows partially
     }
 
     const current = hh.hvac.setpoint;
@@ -565,10 +557,7 @@ export function checkAndRecordPayout(
   if (!hh.xrplWallet?.trustLineCreated) return null;
   if (hh.savingsUSD_pending < PAYOUT_THRESHOLD_USD) return null;
 
-<<<<<<< HEAD
-=======
-  // Pay out the full pending amount (in multiples of threshold or all of it)
->>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
+  // Pay out the full pending amount
   const payoutAmount = +hh.savingsUSD_pending.toFixed(2);
   const record: PayoutRecord = {
     id: nextId("payout"),

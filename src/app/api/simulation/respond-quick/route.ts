@@ -83,13 +83,14 @@ export async function GET(req: NextRequest) {
           destination: hh.xrplWallet!.address,
           amount: payoutAmount.toFixed(2),
         });
-        checkAndRecordPayout(hh.id, txResult.hash);
+        const txHash = ((txResult.result as unknown) as Record<string, unknown>).hash as string ?? "";
+        checkAndRecordPayout(hh.id, txHash);
 
         await sendPushNotification({
           title: "💰 RLUSD Payout Sent!",
           message:
             `$${payoutAmount.toFixed(2)} RLUSD → your wallet!\n` +
-            `TX: ${txResult.hash.slice(0, 16)}…\n` +
+            `TX: ${txHash.slice(0, 16)}…\n` +
             `Total earned: $${hh.savingsUSD_paid.toFixed(2)} RLUSD`,
           priority: 4,
           tags: ["moneybag", "rocket"],
