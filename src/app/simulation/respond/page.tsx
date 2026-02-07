@@ -23,6 +23,10 @@ export default function RespondPage() {
     setpoint?: number;
     credits?: number;
     totalCredits?: number;
+    savingsUSD?: number;
+    savingsPending?: number;
+    savingsPaid?: number;
+    payoutTriggered?: boolean;
     error?: string;
   }>({});
 
@@ -56,6 +60,10 @@ export default function RespondPage() {
           setpoint: data.recommendation?.recommendedSetpoint,
           credits: data.recommendation?.estimatedCredits,
           totalCredits: data.household?.credits,
+          savingsUSD: data.savings?.thisEvent,
+          savingsPending: data.savings?.pending,
+          savingsPaid: data.savings?.paid,
+          payoutTriggered: data.savings?.payoutTriggered,
         });
       } else {
         setStatus("declined");
@@ -126,7 +134,7 @@ export default function RespondPage() {
               </p>
             </div>
 
-            <div className="flex justify-center gap-8">
+            <div className="flex justify-center gap-6">
               <div className="text-center">
                 <span className="text-[10px] font-mono text-white/25 block">
                   EARNED
@@ -150,7 +158,47 @@ export default function RespondPage() {
                   credits
                 </span>
               </div>
+              {details.savingsUSD !== undefined && details.savingsUSD > 0 && (
+                <>
+                  <div className="w-px bg-white/[0.06]" />
+                  <div className="text-center">
+                    <span className="text-[10px] font-mono text-white/25 block">
+                      SAVINGS
+                    </span>
+                    <span className="text-[28px] font-mono font-bold text-purple-400">
+                      +${details.savingsUSD.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] font-mono text-white/25 block">
+                      RLUSD
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
+
+            {details.payoutTriggered && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="rounded-xl bg-purple-500/[0.08] border border-purple-500/20 p-3 text-center"
+              >
+                <span className="text-[14px]">🚀</span>
+                <p className="text-[12px] font-mono font-bold text-purple-400 mt-1">
+                  RLUSD Payout Sent!
+                </p>
+                <p className="text-[10px] font-mono text-white/30">
+                  ${details.savingsPaid?.toFixed(2)} total paid to your XRPL wallet
+                </p>
+              </motion.div>
+            )}
+
+            {!details.payoutTriggered && details.savingsPending !== undefined && (
+              <p className="text-[10px] font-mono text-purple-400/40">
+                💎 ${details.savingsPending.toFixed(2)} pending →
+                payout at $1.00
+              </p>
+            )}
 
             <p className="text-[11px] font-mono text-white/20">
               Thank you for helping your neighbourhood stay resilient.

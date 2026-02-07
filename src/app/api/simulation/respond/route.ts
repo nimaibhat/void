@@ -4,6 +4,7 @@
  * Accept or decline a recommendation.
  * Sends iOS push confirmation via ntfy.
  * If accepted AND household is linked to Enode, also adjusts real thermostat.
+ * If accepted AND savings threshold met AND XRPL wallet linked, sends RLUSD payout.
  *
  * Body: { recommendationId: string, action: "ACCEPT" | "DECLINE" }
  */
@@ -11,9 +12,13 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   acceptRecommendation,
   declineRecommendation,
+  isPayoutReady,
+  checkAndRecordPayout,
+  PAYOUT_THRESHOLD_USD,
 } from "@/lib/simulation";
 import { controlHvac } from "@/lib/enode";
 import { sendPushNotification } from "@/lib/notify";
+import { sendRLUSDPayout } from "@/lib/xrpl";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,47 +50,80 @@ export async function POST(req: NextRequest) {
 
     // Accept
     const result = acceptRecommendation(recommendationId);
+    const hh = result.household;
 
-    // Push confirmation
+    // Push confirmation with savings info
     sendPushNotification({
       title: "✅ Thermostat Adjusted",
       message:
         `Your thermostat has been set to ${result.recommendation.recommendedSetpoint}°C.\n` +
         `You earned +${result.recommendation.estimatedCredits} resilience credits!\n` +
-        `Total credits: ${result.household.credits}`,
+        `💵 Estimated savings: $${result.recommendation.estimatedSavingsUSD.toFixed(2)} ` +
+        `(pending: $${hh.savingsUSD_pending.toFixed(2)})` +
+        (hh.savingsUSD_pending >= PAYOUT_THRESHOLD_USD
+          ? `\n🚀 Payout threshold reached! Sending RLUSD...`
+          : `\n📊 $${(PAYOUT_THRESHOLD_USD - hh.savingsUSD_pending).toFixed(2)} more until RLUSD payout`),
       priority: 3,
       tags: ["white_check_mark", "thermometer"],
     });
 
     // If backed by a real Enode device, also send the command
-    if (result.needsEnodeCall && result.household.enodeHvacId) {
+    let enodeSynced = false;
+    let enodeError: string | undefined;
+    if (result.needsEnodeCall && hh.enodeHvacId) {
       try {
-        const enodeResult = await controlHvac(
-          result.household.enodeHvacId,
-          {
-            mode: result.household.hvac.mode,
-            heatSetpoint: result.recommendation.recommendedSetpoint,
-          }
-        );
-        return NextResponse.json({
-          ok: true,
-          ...result,
-          enodeAction: enodeResult,
-          enodeSynced: true,
+        await controlHvac(hh.enodeHvacId, {
+          mode: hh.hvac.mode,
+          heatSetpoint: result.recommendation.recommendedSetpoint,
         });
-      } catch (enodeErr) {
-        const msg =
-          enodeErr instanceof Error ? enodeErr.message : String(enodeErr);
-        return NextResponse.json({
-          ok: true,
-          ...result,
-          enodeSynced: false,
-          enodeError: msg,
-        });
+        enodeSynced = true;
+      } catch (err) {
+        enodeError = err instanceof Error ? err.message : String(err);
       }
     }
 
-    return NextResponse.json({ ok: true, ...result, enodeSynced: false });
+    // ── Auto-payout RLUSD if threshold reached ──────────────
+    let payoutResult = null;
+    if (isPayoutReady(hh.id)) {
+      try {
+        const payoutAmount = +hh.savingsUSD_pending.toFixed(2);
+        const txResult = await sendRLUSDPayout({
+          destination: hh.xrplWallet!.address,
+          amount: payoutAmount.toFixed(2),
+        });
+
+        payoutResult = checkAndRecordPayout(hh.id, txResult.hash);
+
+        // Send payout notification
+        await sendPushNotification({
+          title: "💰 RLUSD Payout Sent!",
+          message:
+            `$${payoutAmount.toFixed(2)} RLUSD → your wallet!\n` +
+            `TX: ${txResult.hash.slice(0, 16)}…\n` +
+            `Total earned: $${hh.savingsUSD_paid.toFixed(2)} RLUSD`,
+          priority: 4,
+          tags: ["moneybag", "rocket"],
+          noAttach: true,
+        });
+      } catch (payoutErr) {
+        console.error("[XRPL] Auto-payout failed:", payoutErr);
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      enodeSynced,
+      enodeError,
+      savings: {
+        thisEvent: result.recommendation.estimatedSavingsUSD,
+        pending: +hh.savingsUSD_pending.toFixed(4),
+        paid: +hh.savingsUSD_paid.toFixed(2),
+        threshold: PAYOUT_THRESHOLD_USD,
+        payoutTriggered: !!payoutResult,
+      },
+      payout: payoutResult,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
