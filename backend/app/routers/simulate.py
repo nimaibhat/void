@@ -23,5 +23,6 @@ async def cascade_simulation(
         start_time_str=body.start_time,
         forecast_hour=body.forecast_hour,
         region=body.region,
+        scenario=body.scenario,
     )
     return SuccessResponse(data=CascadeResult(**data))

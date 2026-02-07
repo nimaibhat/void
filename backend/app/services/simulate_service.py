@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.services import demand_service
 from app.services.cascade_service import run_cascade
@@ -19,6 +19,7 @@ async def run_cascade_simulation(
     start_time_str: str,
     forecast_hour: int,
     region: str,
+    scenario: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Full pipeline: compute demand from ERCOT data → run cascade.
 
@@ -30,23 +31,28 @@ async def run_cascade_simulation(
         Hour offset into the forecast (0-48).
     region : str
         ISO region (currently only ERCOT has real grid data).
+    scenario : str, optional
+        Explicit scenario name ("uri", "normal", "live").
+        If provided, takes precedence over date-string inference.
     """
-    # Determine scenario from start_time
-    if start_time_str == "live":
-        scenario = "live"
+    # Determine scenario: prefer explicit param, fall back to date inference
+    if scenario and scenario in ("uri", "normal", "live"):
+        resolved_scenario = scenario
+    elif start_time_str == "live":
+        resolved_scenario = "live"
     else:
-        scenario = "uri" if "2021-02" in start_time_str else "normal"
+        resolved_scenario = "uri" if "2021-02" in start_time_str else "normal"
 
     # Compute demand multipliers from real ERCOT data
     multipliers = demand_service.compute_demand_multipliers(
-        scenario=scenario, forecast_hour=forecast_hour
+        scenario=resolved_scenario, forecast_hour=forecast_hour
     )
 
     # Run the cascade simulation on a deep copy of the grid
     result = run_cascade(
         graph=grid_graph.graph,
         demand_multipliers=multipliers,
-        scenario_label=f"{region.lower()}_{start_time_str[:10].replace('-', '')}",
+        scenario_label=f"{region.lower()}_{resolved_scenario}",
         forecast_hour=forecast_hour,
     )
 

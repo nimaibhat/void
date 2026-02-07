@@ -6,6 +6,16 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+async function post<T>(path: string, body: any): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
+}
+
 /* ================================================================== */
 /*  OVERVIEW                                                           */
 /* ================================================================== */
@@ -177,6 +187,58 @@ export async function fetchPrices(region: string, scenario: string, mode?: strin
     `/forecast/prices/${region}?scenario=${scenario}${modeParam}`
   );
   return res.data.prices;
+}
+
+/* ================================================================== */
+/*  CASCADE SIMULATION                                                 */
+/* ================================================================== */
+export interface FailedNodeInfo {
+  id: string;
+  lat: number;
+  lon: number;
+  load_mw: number;
+  capacity_mw: number;
+}
+
+export interface CascadeStep {
+  step: number;
+  new_failures: FailedNodeInfo[];
+  total_failed: number;
+  total_load_shed_mw: number;
+}
+
+export interface FinalNodeState {
+  status: "failed" | "stressed" | "nominal";
+  current_load_mw: number;
+  capacity_mw: number;
+  load_pct: number;
+}
+
+export interface CascadeResult {
+  scenario: string;
+  forecast_hour: number;
+  started_at: string;
+  completed_at: string;
+  steps: CascadeStep[];
+  total_failed_nodes: number;
+  total_nodes: number;
+  cascade_depth: number;
+  total_load_shed_mw: number;
+  failed_node_ids: string[];
+  final_node_states: Record<string, FinalNodeState>;
+}
+
+export async function runCascadeSimulation(
+  scenario: string,
+  forecastHour = 36
+): Promise<CascadeResult> {
+  const res = await post<{ data: CascadeResult }>("/simulate/cascade", {
+    scenario,
+    forecast_hour: forecastHour,
+    start_time: "2021-02-13T00:00:00",
+    region: "ERCOT",
+  });
+  return res.data;
 }
 
 /* ================================================================== */

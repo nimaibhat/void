@@ -54,7 +54,7 @@ class ErcotDataService:
         headers = {"apikey": key, "Authorization": f"Bearer {key}"}
 
         # Paginate — PostgREST default limit is 1000
-        page_size = 5000
+        page_size = 1000
         offset = 0
         count = 0
 
