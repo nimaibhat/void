@@ -52,6 +52,19 @@ export async function fetchOverview(scenario: string): Promise<OverviewData> {
 }
 
 /* ================================================================== */
+/*  WEATHER EVENTS (LLM-generated)                                     */
+/* ================================================================== */
+export interface WeatherEvent {
+  zone: string;
+  name: string;
+}
+
+export async function fetchWeatherEvents(scenario: string): Promise<WeatherEvent[]> {
+  const res = await get<{ data: WeatherEvent[] }>(`/utility/weather-events?scenario=${scenario}`);
+  return res.data;
+}
+
+/* ================================================================== */
 /*  HOTSPOTS                                                           */
 /* ================================================================== */
 export interface Hotspot {

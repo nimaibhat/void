@@ -22,6 +22,7 @@ from app.services import (
     utility_service,
     crew_dispatch_service,
 )
+from app.services.claude_service import generate_weather_events
 
 router = APIRouter(prefix="/api/utility", tags=["utility"])
 
@@ -45,6 +46,60 @@ async def region_detail(
     if data is None:
         raise HTTPException(status_code=404, detail=f"Region not found: {region}")
     return SuccessResponse(data=data)
+
+
+_ZONE_CITIES = {
+    "Coast": "Houston",
+    "East": "East TX",
+    "Far West": "El Paso",
+    "North": "Lubbock",
+    "North Central": "DFW",
+    "South Central": "Austin / SA",
+    "Southern": "Rio Grande",
+    "West": "Midland",
+}
+
+
+@router.get("/weather-events")
+async def weather_events(
+    scenario: str = Query(default="uri", examples=["uri", "normal", "live"]),
+) -> SuccessResponse[list[dict]]:
+    """LLM-generated weather event descriptions from real Open-Meteo data."""
+    ov = overview_service.get_overview(scenario=scenario)
+
+    zones = []
+    for r in ov.regions:
+        w = r.weather
+        # Compute severity same as frontend
+        if r.status.value in ("blackout", "critical"):
+            sev = 4
+        elif w.temp_f <= 10 or w.temp_f >= 105:
+            sev = 4
+        elif w.temp_f <= 20 or w.temp_f >= 95:
+            sev = 3
+        elif w.is_extreme:
+            sev = 3
+        elif r.status.value == "stressed":
+            sev = 2
+        else:
+            sev = 1
+
+        zones.append({
+            "zone": r.region_id,
+            "city": _ZONE_CITIES.get(r.name, r.name),
+            "temp_f": w.temp_f,
+            "wind_mph": w.wind_mph,
+            "condition": w.condition,
+            "is_extreme": w.is_extreme,
+            "grid_status": r.status.value,
+            "severity": sev,
+        })
+
+    # Only send zones that would appear as events (extreme weather or non-normal grid)
+    event_zones = [z for z in zones if z["is_extreme"] or z["grid_status"] != "normal"]
+
+    events = generate_weather_events(event_zones, scenario=scenario)
+    return SuccessResponse(data=events)
 
 
 @router.get("/crews", response_model=SuccessResponse[CrewOptimizationResponse])

@@ -113,7 +113,7 @@ export function summarizePrices(prices: HourlyPrice[]): PriceSummary {
 /*  Enhance alerts with Claude                                         */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = `You are a smart energy advisor embedded in a home dashboard app called Blackout.
+const SYSTEM_PROMPT = `You are a smart energy advisor embedded in a home dashboard app called Void.
 You write SHORT, friendly, actionable alert text for homeowners in Texas (ERCOT grid).
 
 Rules:

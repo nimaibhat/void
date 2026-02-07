@@ -229,7 +229,7 @@ function IOSNotification({
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-[11px] font-semibold text-white/80 block">
-            Blackout
+            Void
           </span>
           <span className="text-[9px] text-white/30">now</span>
         </div>
@@ -924,7 +924,7 @@ export default function SimulationPage() {
             href="/"
             className="text-[14px] font-semibold tracking-tight text-white hover:text-[#22c55e] transition-colors"
           >
-            blackout
+            void
           </a>
           <span className="text-white/15 mx-1.5">/</span>
           <span className="text-[12px] font-mono text-white/40">

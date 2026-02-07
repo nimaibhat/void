@@ -397,7 +397,7 @@ export default function AdminPage() {
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-[#22c55e] shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
           <span className="text-[14px] font-semibold tracking-tight">
-            blackout
+            void
           </span>
         </div>
         <span className="text-[10px] font-mono text-white/20 border border-white/[0.08] px-2 py-0.5 rounded">

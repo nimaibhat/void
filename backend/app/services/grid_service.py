@@ -153,6 +153,8 @@ async def get_cascade_probability(
 
     total = 0
     above_80 = 0
+    above_95 = 0
+    total_stress = 0.0
     for nid in grid_graph.get_node_ids():
         nd = grid_graph.graph.nodes[nid]
         load = nd["base_load_mw"] * multipliers.get(nid, 1.0)
@@ -161,8 +163,29 @@ async def get_cascade_probability(
         total += 1
         if pct > 80:
             above_80 += 1
+            # Weight by how far above 80% — a node at 120% is much worse than 82%
+            total_stress += min((pct - 80) / 20, 3.0)
+        if pct > 95:
+            above_95 += 1
 
-    ercot_prob = round(above_80 / total, 2) if total else 0.0
+    if total == 0:
+        ercot_prob = 0.0
+    else:
+        # Non-linear cascade probability:
+        # Even a small fraction of critically stressed nodes causes cascade risk
+        # because failed nodes redistribute load to neighbors
+        stressed_frac = above_80 / total
+        critical_frac = above_95 / total
+        avg_overstress = total_stress / max(above_80, 1)
+
+        # Base: sigmoid-like curve where 10% stressed → ~50%, 20% → ~80%, 30% → ~95%
+        base_prob = 1.0 - 1.0 / (1.0 + (stressed_frac / 0.12) ** 2.5)
+        # Boost from critically overloaded nodes (>95%)
+        critical_boost = min(critical_frac * 5, 0.3)
+        # Boost from severity of overstress
+        severity_boost = min(avg_overstress * 0.1, 0.15)
+
+        ercot_prob = round(min(base_prob + critical_boost + severity_boost, 1.0), 2)
 
     return {
         "probabilities": {

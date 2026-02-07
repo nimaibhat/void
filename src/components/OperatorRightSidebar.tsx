@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ================================================================== */
@@ -14,6 +14,7 @@ export interface CrewData {
   lng: number;
   personnel: number;
   eta?: string;
+  target?: string;
 }
 
 export interface EventData {
@@ -57,16 +58,24 @@ const EVENT_BORDER: Record<EventData["severity"], string> = {
 function CrewCard({
   crew,
   onFocus,
+  isNewlyDispatched,
 }: {
   crew: CrewData;
   onFocus: () => void;
+  isNewlyDispatched?: boolean;
 }) {
-  const pill = STATUS_PILL[crew.status];
+  const pill = STATUS_PILL[crew.status] ?? STATUS_PILL.standby;
 
   return (
-    <button
+    <motion.button
+      layout
       onClick={onFocus}
-      className="w-full text-left bg-[#0a0a0a] rounded-xl p-5 border border-[#1a1a1a] hover:border-[#22c55e]/40 transition-colors cursor-pointer"
+      initial={isNewlyDispatched ? { scale: 1.03, borderColor: "rgba(34,197,94,0.6)" } : false}
+      animate={{ scale: 1, borderColor: "rgba(26,26,26,1)" }}
+      transition={{ duration: 0.6 }}
+      className={`w-full text-left bg-[#0a0a0a] rounded-xl p-5 border border-[#1a1a1a] hover:border-[#22c55e]/40 transition-colors cursor-pointer ${
+        isNewlyDispatched ? "ring-1 ring-[#22c55e]/30" : ""
+      }`}
     >
       {/* Top: ID + status */}
       <div className="flex items-center justify-between gap-2 mb-2">
@@ -81,6 +90,13 @@ function CrewCard({
       {/* Location — no truncation */}
       <p className="text-sm text-[#a1a1aa] mb-2">{crew.location}</p>
 
+      {/* Target assignment */}
+      {crew.target && (
+        <p className="text-xs text-[#22c55e]/70 font-mono mb-2">
+          → {crew.target}
+        </p>
+      )}
+
       {/* Bottom: personnel + ETA */}
       <div className="flex items-center gap-3 text-xs text-[#71717a]">
         <span>{crew.personnel} personnel</span>
@@ -88,7 +104,7 @@ function CrewCard({
           <span className="text-[#f59e0b] font-mono">ETA {crew.eta}</span>
         )}
       </div>
-    </button>
+    </motion.button>
   );
 }
 
@@ -167,6 +183,11 @@ export default function OperatorRightSidebar({
   const [events, setEvents] = useState(initialEvents);
   const [newestId, setNewestId] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeResult, setOptimizeResult] = useState<string | null>(null);
+  const [dispatchedCrews, setDispatchedCrews] = useState<CrewData[]>([]);
+  const [dispatchedIds, setDispatchedIds] = useState<Set<string>>(new Set());
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Sync initial events from parent when they change
   useEffect(() => {
@@ -174,10 +195,12 @@ export default function OperatorRightSidebar({
   }, [initialEvents]);
 
   // Crew counts
-  const deployed = crews.filter((c) => c.status === "deployed").length;
-  const enRoute = crews.filter((c) => c.status === "en_route").length;
-  const standby = crews.filter((c) => c.status === "standby").length;
-  const total = crews.length;
+  // Use dispatch-updated crews if available, otherwise fall back to prop crews
+  const displayCrews = dispatchedCrews.length > 0 ? dispatchedCrews : crews;
+  const deployed = displayCrews.filter((c) => c.status === "deployed").length;
+  const enRoute = displayCrews.filter((c) => c.status === "en_route").length;
+  const standby = displayCrews.filter((c) => c.status === "standby").length;
+  const total = displayCrews.length;
 
   // SSE real-time event stream from backend
   useEffect(() => {
@@ -245,6 +268,110 @@ export default function OperatorRightSidebar({
     [onFocusLocation]
   );
 
+  // Map backend status to UI status
+  const mapCrewStatus = (s: string): CrewData["status"] => {
+    if (s === "en_route" || s === "dispatched") return "en_route";
+    if (s === "on_site" || s === "repairing" || s === "complete" || s === "deployed") return "deployed";
+    return "standby";
+  };
+
+  // Fetch dispatch status and update crew list
+  const fetchDispatchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/backend/utility/crews/dispatch/status");
+      if (!res.ok) return;
+      const json = await res.json();
+      const statusData = json.data;
+      if (!statusData?.crews) return;
+
+      // Build assignment lookup: crew_id → assignment
+      const assignmentMap = new Map<string, any>();
+      for (const a of statusData.assignments ?? []) {
+        assignmentMap.set(a.crew_id, a);
+      }
+
+      const updated: CrewData[] = statusData.crews.map((c: any) => {
+        const a = assignmentMap.get(c.crew_id);
+        const etaMin = c.eta_minutes ?? a?.eta_minutes ?? 0;
+        return {
+          id: c.crew_id,
+          status: mapCrewStatus(c.status),
+          location: `${c.city ?? "Unknown"} · ${(c.specialty ?? "general").replace(/_/g, " ")}`,
+          lat: c.lat,
+          lng: c.lon,
+          personnel: 6,
+          eta: etaMin > 0 ? `${Math.floor(etaMin / 60)}h ${etaMin % 60}m` : undefined,
+          target: a?.target_node_id ?? undefined,
+        };
+      });
+
+      setDispatchedCrews(updated);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Cleanup tick interval on unmount
+  useEffect(() => {
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, []);
+
+  const handleOptimizeAll = useCallback(async () => {
+    setOptimizing(true);
+    setOptimizeResult(null);
+
+    // Stop any existing tick interval
+    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+
+    try {
+      // Step 1: Initialize dispatch with current scenario
+      const initRes = await fetch(
+        `/api/backend/utility/crews/dispatch/init?scenario=${scenario || "uri"}`,
+        { method: "POST" }
+      );
+      if (!initRes.ok) throw new Error(`Init failed: ${initRes.status}`);
+      const initData = await initRes.json();
+      const failedNodes = initData.data?.failed_nodes ?? 0;
+
+      // Step 2: Dispatch all crews
+      const dispatchRes = await fetch("/api/backend/utility/crews/dispatch/all", {
+        method: "POST",
+      });
+      if (!dispatchRes.ok) throw new Error(`Dispatch failed: ${dispatchRes.status}`);
+      const result = await dispatchRes.json();
+      const assignments = result.data ?? [];
+
+      // Mark dispatched crew IDs for highlight animation
+      const ids = new Set<string>(assignments.map((a: any) => a.crew_id));
+      setDispatchedIds(ids);
+      setTimeout(() => setDispatchedIds(new Set()), 4000);
+
+      setOptimizeResult(`${assignments.length} crews → ${failedNodes} failed nodes`);
+
+      // Immediately fetch updated status
+      await fetchDispatchStatus();
+
+      // Start polling tick every 5s to progress crews through state machine
+      tickRef.current = setInterval(async () => {
+        try {
+          await fetch("/api/backend/utility/crews/dispatch/tick", { method: "POST" });
+          await fetchDispatchStatus();
+        } catch {
+          // ignore
+        }
+      }, 5000);
+
+    } catch (err) {
+      console.error("Crew optimization failed:", err);
+      setOptimizeResult("Failed — check console");
+    } finally {
+      setOptimizing(false);
+      setTimeout(() => setOptimizeResult(null), 6000);
+    }
+  }, [scenario, fetchDispatchStatus]);
+
   return (
     <aside className="w-96 flex-shrink-0 border-l border-[#1a1a1a] hidden lg:flex flex-col bg-[#0a0a0a] overflow-hidden">
       {/* ============================================================ */}
@@ -293,10 +420,12 @@ export default function OperatorRightSidebar({
             <div className="h-2.5 rounded-full bg-[#1a1a1a] overflow-hidden w-full mt-3">
               <div
                 className="h-full rounded-full bg-[#22c55e] transition-all duration-1000"
-                style={{ width: `${Math.round(crewCoverage)}%` }}
+                style={{ width: `${total > 0 ? Math.round(((deployed + enRoute) / total) * 100) : Math.round(crewCoverage)}%` }}
               />
             </div>
-            <span className="text-xs text-[#3f3f46] mt-1 block">{Math.round(crewCoverage)}% coverage</span>
+            <span className="text-xs text-[#3f3f46] mt-1 block">
+              {total > 0 ? Math.round(((deployed + enRoute) / total) * 100) : Math.round(crewCoverage)}% coverage
+            </span>
           </div>
 
           {/* Summary bar */}
@@ -336,23 +465,40 @@ export default function OperatorRightSidebar({
             className="flex-1 overflow-y-auto space-y-4 min-h-0"
             style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.06) transparent" }}
           >
-            {crews.map((crew) => (
-              <CrewCard
-                key={crew.id}
-                crew={crew}
-                onFocus={() => handleCrewFocus(crew)}
-              />
-            ))}
+            <AnimatePresence mode="popLayout">
+              {displayCrews.map((crew) => (
+                <CrewCard
+                  key={crew.id}
+                  crew={crew}
+                  onFocus={() => handleCrewFocus(crew)}
+                  isNewlyDispatched={dispatchedIds.has(crew.id)}
+                />
+              ))}
+            </AnimatePresence>
           </div>
 
           {/* Optimize button — sticky at bottom */}
           <div className="flex-shrink-0 mt-4 space-y-1.5">
-            <button className="w-full h-12 rounded-lg bg-[#22c55e] text-white text-sm font-semibold hover:bg-[#16a34a] hover:shadow-[0_0_20px_rgba(34,197,94,0.2)] transition-all cursor-pointer active:scale-[0.98]">
-              Optimize All Crews →
+            <button
+              onClick={handleOptimizeAll}
+              disabled={optimizing}
+              className={`w-full h-12 rounded-lg text-white text-sm font-semibold transition-all cursor-pointer active:scale-[0.98] ${
+                optimizing
+                  ? "bg-[#22c55e]/50 cursor-wait"
+                  : "bg-[#22c55e] hover:bg-[#16a34a] hover:shadow-[0_0_20px_rgba(34,197,94,0.2)]"
+              }`}
+            >
+              {optimizing ? "Optimizing..." : "Optimize All Crews →"}
             </button>
-            <p className="text-[10px] text-[#3f3f46] text-center">
-              AI-recommended repositioning based on forecast
-            </p>
+            {optimizeResult ? (
+              <p className="text-[10px] text-[#22c55e] text-center font-mono">
+                {optimizeResult}
+              </p>
+            ) : (
+              <p className="text-[10px] text-[#3f3f46] text-center">
+                AI-recommended repositioning based on forecast
+              </p>
+            )}
           </div>
         </div>
       ) : (

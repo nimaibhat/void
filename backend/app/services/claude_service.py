@@ -1,9 +1,10 @@
-"""Claude-enhanced alert text generation for the orchestrator pipeline.
+"""Claude-enhanced text generation for the orchestrator pipeline.
 
-Uses Claude Haiku to rewrite template alert text into concise, personalised
-prose that references ERCOT average utility rates for context.
+Uses Claude Haiku to:
+- Rewrite template alert text into concise, personalised prose.
+- Generate weather event descriptions from real Open-Meteo data.
 
-Falls back to the original text on any error or timeout.
+Falls back to original/default text on any error or timeout.
 """
 
 from __future__ import annotations
@@ -11,7 +12,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from dotenv import load_dotenv
+
+# Load .env from project root (backend/../.env)
+_env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+load_dotenv(_env_path)
 
 logger = logging.getLogger("blackout.claude")
 
@@ -141,3 +149,98 @@ def enhance_alerts(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     except Exception as exc:
         logger.warning("Claude enhancement failed: %s — using original text", exc)
         return alerts
+
+
+# ── Weather event generation ─────────────────────────────────────────
+
+WEATHER_SYSTEM_PROMPT = """You are a meteorologist writing concise weather event bulletins for the ERCOT Texas power grid control room.
+
+Rules:
+- Each event gets a "name" (max 55 chars) — a short NWS-style event headline.
+- Use the ACTUAL temperature and wind speed provided. Never invent figures.
+- Reference the Texas city/region name naturally.
+- Sound like real NWS alerts: "Ice Storm Warning: DFW -2°F, 25mph gusts"
+- Vary the language — don't repeat the same phrasing across events.
+- For non-extreme zones (severity 1), write calmer descriptions like "Cold front: Lubbock 28°F, light winds"
+- Return valid JSON array: [{"zone": "...", "name": "..."}]
+- Return ONLY the JSON array, no markdown fences.
+- Array order must match input order."""
+
+# Cache per scenario so we don't call Claude on every page load
+_weather_event_cache: Dict[str, List[Dict[str, str]]] = {}
+
+
+def generate_weather_events(
+    zones: List[Dict[str, Any]],
+    scenario: str = "uri",
+) -> List[Dict[str, str]]:
+    """Generate LLM-written weather event descriptions from real weather data.
+
+    Parameters
+    ----------
+    zones : list of dicts
+        Each dict: {zone, city, temp_f, wind_mph, condition, is_extreme, grid_status, severity}
+    scenario : str
+        Cache key (uri / normal / live).
+
+    Returns list of {zone, name} dicts.  Falls back to simple descriptions on error.
+    """
+    if scenario in _weather_event_cache:
+        return _weather_event_cache[scenario]
+
+    # Build fallback descriptions in case Claude is unavailable
+    fallback = [
+        {"zone": z["zone"], "name": f'{z["condition"]} {round(z["temp_f"])}°F — {z["city"]}'}
+        for z in zones
+    ]
+
+    if not zones:
+        return fallback
+
+    client = _get_client()
+    if client is None:
+        return fallback
+
+    zone_descriptions = []
+    for i, z in enumerate(zones):
+        zone_descriptions.append(
+            f'{i+1}. zone="{z["zone"]}" city="{z["city"]}" '
+            f'temp={z["temp_f"]}°F wind={z["wind_mph"]}mph '
+            f'condition="{z["condition"]}" grid_status="{z["grid_status"]}" severity={z["severity"]}'
+        )
+
+    user_message = (
+        f"Generate weather event headlines for these {len(zones)} ERCOT zones. "
+        f"Scenario: {scenario}.\n\n"
+        + "\n".join(zone_descriptions)
+    )
+
+    try:
+        import anthropic
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=WEATHER_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+            timeout=8.0,
+        )
+
+        text = response.content[0].text if response.content else ""
+        cleaned = text.replace("```json", "").replace("```", "").strip()
+        events: List[Dict[str, str]] = json.loads(cleaned)
+
+        if len(events) != len(zones):
+            logger.warning(
+                "Claude returned %d events but expected %d — falling back",
+                len(events), len(zones),
+            )
+            return fallback
+
+        logger.info("Claude generated %d weather event(s) for scenario=%s", len(events), scenario)
+        _weather_event_cache[scenario] = events
+        return events
+
+    except Exception as exc:
+        logger.warning("Weather event generation failed: %s — using fallback", exc)
+        return fallback

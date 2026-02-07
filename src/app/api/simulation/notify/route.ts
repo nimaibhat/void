@@ -63,9 +63,9 @@ export async function POST(req: NextRequest) {
       const acceptUrl = `${base}/simulation/respond?id=test&action=ACCEPT`;
       const declineUrl = `${base}/simulation/respond?id=test&action=DECLINE`;
       const sent = await sendPushNotification({
-        title: "⚡ Blackout Test Alert",
+        title: "⚡ Void Test Alert",
         message:
-          "This is a test notification from Blackout.\n\n" +
+          "This is a test notification from Void.\n\n" +
           "🌡️ Current: 22°C → Recommended: 19°C\n" +
           "🏆 You'll earn +15 resilience credits",
         priority: 4,

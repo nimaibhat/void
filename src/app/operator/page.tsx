@@ -8,7 +8,6 @@ import OperatorRightSidebar from "@/components/OperatorRightSidebar";
 import CascadeOverlay from "@/components/CascadeOverlay";
 import OperatorEntryModal, { getRegionFromZip } from "@/components/OperatorEntryModal";
 import { useRealtimeSession } from "@/hooks/useRealtimeSession";
-import EiaDataPanel from "@/components/EiaDataPanel";
 import {
   fetchOverview,
   fetchHotspots,
@@ -17,7 +16,10 @@ import {
   fetchCrews,
   fetchEvents,
   fetchGridNodes,
+  fetchWeatherEvents,
   type OverviewData,
+  type RegionWeather,
+  type WeatherEvent,
   type Hotspot,
   type Arc,
   type CascadeProbability,
@@ -42,8 +44,12 @@ type GridStatus = "NOMINAL" | "STRESSED" | "CRITICAL" | "CASCADE";
 
 interface RegionSegment {
   name: string;
+  displayName: string;
   status: "nominal" | "stressed" | "critical";
   width: string;
+  load_mw: number;
+  capacity_mw: number;
+  utilization_pct: number;
 }
 
 interface TickerItem {
@@ -156,31 +162,83 @@ function mapEvents(raw: TimelineEvent[]): EventData[] {
   });
 }
 
+// ERCOT weather zone → recognizable Texas region/city
+const ZONE_DISPLAY: Record<string, string> = {
+  Coast: "Houston",
+  East: "East TX",
+  "Far West": "El Paso",
+  North: "Lubbock",
+  "North Central": "DFW",
+  "South Central": "Austin / SA",
+  Southern: "Rio Grande",
+  West: "Midland",
+};
+
 function buildSegments(overview: OverviewData): RegionSegment[] {
   const regions = overview.regions;
   const total = regions.reduce((s, r) => s + r.load_mw, 0);
   return regions
     .sort((a, b) => b.load_mw - a.load_mw)
-    .slice(0, 6)
     .map((r) => ({
       name: r.name,
+      displayName: ZONE_DISPLAY[r.name] ?? r.name,
       status: mapStatus(r.status),
       width: `${Math.max((r.load_mw / total) * 100, 5)}%`,
+      load_mw: r.load_mw,
+      capacity_mw: r.capacity_mw,
+      utilization_pct: r.utilization_pct,
     }));
 }
 
-function buildThreats(overview: OverviewData) {
+// Map ERCOT zone names to approximate coordinates
+const ZONE_COORDS: Record<string, { lat: number; lng: number }> = {
+  Coast: { lat: 29.76, lng: -95.37 },
+  East: { lat: 31.3, lng: -94.8 },
+  "Far West": { lat: 31.8, lng: -104.0 },
+  North: { lat: 33.5, lng: -97.0 },
+  "North Central": { lat: 32.78, lng: -96.8 },
+  "South Central": { lat: 30.27, lng: -97.74 },
+  Southern: { lat: 27.8, lng: -97.4 },
+  West: { lat: 31.5, lng: -100.5 },
+};
+
+function weatherSeverity(w: RegionWeather, status: string): number {
+  // Grid status overrides
+  if (status === "blackout") return 4;
+  if (status === "critical") return 4;
+  // Temperature-based severity
+  if (w.temp_f <= 10 || w.temp_f >= 105) return 4;
+  if (w.temp_f <= 20 || w.temp_f >= 95) return 3;
+  if (w.is_extreme) return 3;
+  if (status === "stressed") return 2;
+  return 1;
+}
+
+function buildThreats(overview: OverviewData, llmEvents?: WeatherEvent[]) {
+  // Build a lookup: zone → LLM-generated name
+  const llmLookup: Record<string, string> = {};
+  if (llmEvents) {
+    for (const e of llmEvents) llmLookup[e.zone] = e.name;
+  }
+
   return overview.regions
     .filter((r) => r.weather.is_extreme || r.status !== "normal")
-    .map((r, i) => ({
-      id: `t-${r.region_id}`,
-      icon: r.status === "critical" || r.status === "blackout" ? "🔴" : r.weather.is_extreme ? "🟡" : "🟢",
-      name: `${r.weather.condition} — ${r.name}`,
-      severity: r.status === "critical" || r.status === "blackout" ? 4 : r.weather.is_extreme ? 3 : 2,
-      region: "ERCOT",
-      lat: 30.27 + (i - 3) * 0.8,
-      lng: -97.74 + (i - 3) * 1.2,
-    }));
+    .map((r) => {
+      const sev = weatherSeverity(r.weather, r.status);
+      const coords = ZONE_COORDS[r.name] ?? { lat: 30.27, lng: -97.74 };
+      const name = llmLookup[r.region_id]
+        ?? `${r.weather.condition} ${Math.round(r.weather.temp_f)}°F — ${r.name}`;
+      return {
+        id: `t-${r.region_id}`,
+        icon: sev >= 4 ? "🔴" : sev >= 3 ? "🟡" : "🟢",
+        name,
+        severity: sev,
+        region: "ERCOT",
+        lat: coords.lat,
+        lng: coords.lng,
+      };
+    })
+    .sort((a, b) => b.severity - a.severity);
 }
 
 function buildTicker(
@@ -273,40 +331,76 @@ interface ThreatData {
   lng: number;
 }
 
+const UTIL_COLOR = (pct: number) =>
+  pct >= 95 ? "text-[#ef4444]" : pct >= 70 ? "text-[#f59e0b]" : "text-[#22c55e]";
+
 function GridStatusCard({
   status,
   segments,
+  totalLoad,
+  totalCapacity,
 }: {
   status: GridStatus;
   segments: RegionSegment[];
+  totalLoad: number;
+  totalCapacity: number;
 }) {
   const style = STATUS_STYLE[status];
+  const totalUtil = totalCapacity > 0 ? (totalLoad / totalCapacity) * 100 : 0;
   return (
     <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-6 space-y-3">
-      <span className="text-xs uppercase tracking-widest text-[#52525b] font-semibold block mb-3">
-        National Grid Status
-      </span>
-      <span
-        className={`block text-3xl font-bold ${style.color} ${
-          style.pulse ? "animate-pulse" : ""
-        }`}
-      >
-        {status}
-      </span>
-      <div className="flex h-3 rounded-full overflow-hidden gap-px mt-4">
-        {segments.map((seg) => (
-          <div
-            key={seg.name}
-            className={`${SEGMENT_COLORS[seg.status]}`}
-            style={{ width: seg.width }}
-          />
-        ))}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs uppercase tracking-widest text-[#52525b] font-semibold">
+          Texas Grid Status
+        </span>
+        <span
+          className={`text-xs font-mono font-bold ${style.color} ${
+            style.pulse ? "animate-pulse" : ""
+          }`}
+        >
+          {status}
+        </span>
       </div>
-      <div className="flex text-[10px] font-mono text-[#52525b]">
+
+      {/* Total load summary */}
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm text-[#52525b]">ERCOT System Load</span>
+        <span className="text-2xl font-mono font-bold text-white">
+          {(totalLoad / 1000).toFixed(1)}
+          <span className="text-sm text-[#52525b] font-normal ml-1">GW</span>
+        </span>
+      </div>
+      <div className="h-2.5 rounded-full bg-[#1a1a1a] overflow-hidden w-full">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ${
+            totalUtil >= 95 ? "bg-[#ef4444]" : totalUtil >= 70 ? "bg-[#f59e0b]" : "bg-[#22c55e]"
+          }`}
+          style={{ width: `${Math.min(totalUtil, 100)}%` }}
+        />
+      </div>
+      <span className="text-[10px] text-[#3f3f46] block">
+        {Math.round(totalUtil)}% of {(totalCapacity / 1000).toFixed(1)} GW capacity
+      </span>
+
+      {/* Per-region breakdown */}
+      <div className="pt-3 mt-1 border-t border-[#1a1a1a] space-y-2">
         {segments.map((seg) => (
-          <span key={seg.name} style={{ width: seg.width }} className="truncate">
-            {seg.name}
-          </span>
+          <div key={seg.name} className="flex items-center gap-2">
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEGMENT_COLORS[seg.status]}`}
+            />
+            <span className="text-xs text-[#a1a1aa] flex-1 truncate">
+              {seg.displayName}
+            </span>
+            <span className={`text-xs font-mono font-semibold ${UTIL_COLOR(seg.utilization_pct)}`}>
+              {Math.round(seg.utilization_pct)}%
+            </span>
+            <span className="text-[10px] font-mono text-[#3f3f46] w-16 text-right">
+              {seg.load_mw >= 1000
+                ? `${(seg.load_mw / 1000).toFixed(1)} GW`
+                : `${Math.round(seg.load_mw)} MW`}
+            </span>
+          </div>
         ))}
       </div>
     </div>
@@ -323,17 +417,14 @@ function ThreatsCard({
   focusedId: string | null;
 }) {
   return (
-    <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-6 space-y-3">
-      <span className="text-xs uppercase tracking-widest text-[#52525b] font-semibold block mb-3">
-        Active Weather Events
-      </span>
-      <div className="flex items-baseline justify-between">
-        <span className="text-sm text-[#52525b]">events tracked</span>
-        <span className="text-4xl font-mono font-bold text-white leading-none">
-          {threats.length}
+    <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs uppercase tracking-widest text-[#52525b] font-semibold">
+          Weather Events
         </span>
+        <span className="text-sm font-mono font-bold text-white">{threats.length}</span>
       </div>
-      <div className="space-y-2 pt-1">
+      <div className="space-y-0.5">
         {threats.map((t) => {
           const sev = SEVERITY_BADGE[t.severity] || SEVERITY_BADGE[2];
           const isFocused = focusedId === t.id;
@@ -341,18 +432,18 @@ function ThreatsCard({
             <button
               key={t.id}
               onClick={() => onFocus(t)}
-              className={`w-full flex items-center gap-3 min-h-[44px] px-3 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
                 isFocused
-                  ? "bg-[#1a1a1a] border border-[#333]"
-                  : "hover:bg-[#111] border border-transparent"
+                  ? "bg-[#1a1a1a]"
+                  : "hover:bg-[#111]"
               }`}
             >
-              <span className="text-sm leading-none flex-shrink-0">{t.icon}</span>
-              <span className="text-sm text-white flex-1">{t.name}</span>
+              <span className="text-xs leading-none flex-shrink-0">{t.icon}</span>
+              <span className="text-xs text-[#a1a1aa] flex-1 truncate">{t.name}</span>
               <span
-                className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border flex-shrink-0 ${sev.bg} ${sev.text} ${sev.border}`}
+                className={`text-[9px] font-mono font-semibold px-1.5 py-px rounded-full border flex-shrink-0 ${sev.bg} ${sev.text} ${sev.border}`}
               >
-                SEV {t.severity}
+                {t.severity}
               </span>
             </button>
           );
@@ -468,12 +559,12 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
   const [crewCoverage, setCrewCoverage] = useState(0);
   const [gridNodes, setGridNodes] = useState<GridNode[]>([]);
   const [gridEdges, setGridEdges] = useState<GridEdgeData[]>([]);
+  const [weatherEvents, setWeatherEvents] = useState<WeatherEvent[]>([]);
 
   /* ---- UI state ---- */
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
   const [focusedThreatId, setFocusedThreatId] = useState<string | null>(null);
   const [isCascadeOpen, setIsCascadeOpen] = useState(false);
-  const [isEiaOpen, setIsEiaOpen] = useState(false);
 
   /* ---- Realtime session ---- */
   const { session: liveSession, isActive: isSimActive } = useRealtimeSession();
@@ -509,6 +600,11 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
       setCrews(mapCrews(cr.crews));
       setCrewCoverage(cr.coverage_pct);
       setEvents(mapEvents(ev));
+
+      // Fetch LLM weather events in background (don't block page load)
+      fetchWeatherEvents(sc)
+        .then(setWeatherEvents)
+        .catch(() => setWeatherEvents([]));
     } catch (err) {
       console.error("Failed to load operator data:", err);
     } finally {
@@ -548,7 +644,9 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
       ? mapGridStatus(overview.national_status)
       : "NOMINAL";
   const segments: RegionSegment[] = overview ? buildSegments(overview) : [];
-  const threats: ThreatData[] = overview ? buildThreats(overview) : [];
+  const threats: ThreatData[] = overview
+    ? buildThreats(overview, weatherEvents.length > 0 ? weatherEvents : undefined)
+    : [];
   const ercotProb = liveHasFailures
     ? Math.min(1, (liveSession!.total_failed_nodes! / 200))
     : (cascadeData?.probabilities["ERCOT"] ?? 0);
@@ -592,7 +690,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <div className="w-2 h-2 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
           <span className="text-[15px] font-semibold tracking-tight text-white">
-            blackout
+            void
           </span>
         </div>
 
@@ -631,18 +729,6 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
           {time}
         </span>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <FreqDot hz={gridHz} />
-          <span className="text-sm font-mono text-white">{gridHz.toFixed(2)} Hz</span>
-        </div>
-
-        <button
-          onClick={() => setIsEiaOpen(true)}
-          className="h-11 px-4 rounded-lg border border-[#3f3f46] text-sm text-[#a1a1aa] font-semibold hover:text-white hover:border-[#22c55e]/50 transition-colors cursor-pointer flex-shrink-0"
-        >
-          EIA Data
-        </button>
-
         <button
           onClick={handleRunSimulation}
           className="h-11 px-4 rounded-lg bg-[#22c55e] text-white text-sm font-semibold hover:bg-[#16a34a] transition-colors cursor-pointer flex-shrink-0"
@@ -670,7 +756,12 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
           className="w-[352px] flex-shrink-0 border-r border-[#1a1a1a] overflow-y-auto p-5 space-y-5 hidden lg:block"
           style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.06) transparent" }}
         >
-          <GridStatusCard status={gridStatus} segments={segments} />
+          <GridStatusCard
+            status={gridStatus}
+            segments={segments}
+            totalLoad={overview.total_load_mw}
+            totalCapacity={overview.total_capacity_mw}
+          />
           <ThreatsCard
             threats={threats}
             onFocus={handleFocusThreat}
@@ -728,12 +819,6 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
         scenarioKey={scenario}
         region="ERCOT"
         session={liveSession}
-      />
-
-      {/* EIA Data Panel */}
-      <EiaDataPanel
-        isOpen={isEiaOpen}
-        onClose={() => setIsEiaOpen(false)}
       />
     </div>
   );
