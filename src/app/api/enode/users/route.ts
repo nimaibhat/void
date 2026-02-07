@@ -1,10 +1,6 @@
 /**
  * GET  /api/enode/users          — List all Enode users
  * GET  /api/enode/users?id=<id>  — Get a specific user
- *
- * Note: In Enode, users are created implicitly when you generate
- * a Link session (POST /api/enode/link). There is no separate
- * "create user" endpoint.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { listUsers, getUser } from "@/lib/enode";

@@ -12,7 +12,6 @@ interface DeviceInfo {
   vendor: string;
   isReachable: boolean;
   lastSeen: string;
-  // Charger / Vehicle / Battery
   chargeState?: {
     isPluggedIn?: boolean;
     isCharging?: boolean;
@@ -21,11 +20,9 @@ interface DeviceInfo {
     batteryLevel?: number | null;
     range?: number | null;
   };
-  // HVAC
   currentTemperature?: number | null;
   targetTemperature?: number | null;
   operationMode?: string | null;
-  // Enode HVAC actual fields
   temperatureState?: {
     currentTemperature?: number | null;
     isActive?: boolean;
@@ -40,7 +37,6 @@ interface DeviceInfo {
     capableModes?: string[];
     heatSetpointRange?: { min: number; max: number } | null;
   };
-  // Solar
   productionState?: {
     isProducing?: boolean;
     productionRate?: number | null;
@@ -103,7 +99,6 @@ function DeviceCard({
 
   return (
     <div className="border border-white/[0.08] bg-white/[0.02] rounded-lg p-5 hover:border-[#22c55e]/30 transition-all">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-3">
         <span className="text-2xl">{icon}</span>
         <div className="flex-1 min-w-0">
@@ -128,63 +123,40 @@ function DeviceCard({
         </div>
       </div>
 
-      {/* State info */}
       <div className="space-y-1.5 mb-4">
         {device.chargeState && (
           <>
             {device.chargeState.batteryLevel != null && (
               <div className="flex justify-between">
-                <span className="text-[10px] font-mono text-white/30">
-                  Battery
-                </span>
-                <span className="text-[10px] font-mono text-white/60">
-                  {device.chargeState.batteryLevel}%
-                </span>
+                <span className="text-[10px] font-mono text-white/30">Battery</span>
+                <span className="text-[10px] font-mono text-white/60">{device.chargeState.batteryLevel}%</span>
               </div>
             )}
             {device.chargeState.isCharging != null && (
               <div className="flex justify-between">
-                <span className="text-[10px] font-mono text-white/30">
-                  Charging
-                </span>
-                <span
-                  className={`text-[10px] font-mono ${
-                    device.chargeState.isCharging
-                      ? "text-[#22c55e]"
-                      : "text-white/40"
-                  }`}
-                >
+                <span className="text-[10px] font-mono text-white/30">Charging</span>
+                <span className={`text-[10px] font-mono ${device.chargeState.isCharging ? "text-[#22c55e]" : "text-white/40"}`}>
                   {device.chargeState.isCharging ? "YES" : "NO"}
                 </span>
               </div>
             )}
             {device.chargeState.isPluggedIn != null && (
               <div className="flex justify-between">
-                <span className="text-[10px] font-mono text-white/30">
-                  Plugged in
-                </span>
-                <span className="text-[10px] font-mono text-white/60">
-                  {device.chargeState.isPluggedIn ? "YES" : "NO"}
-                </span>
+                <span className="text-[10px] font-mono text-white/30">Plugged in</span>
+                <span className="text-[10px] font-mono text-white/60">{device.chargeState.isPluggedIn ? "YES" : "NO"}</span>
               </div>
             )}
             {device.chargeState.range != null && (
               <div className="flex justify-between">
-                <span className="text-[10px] font-mono text-white/30">
-                  Range
-                </span>
-                <span className="text-[10px] font-mono text-white/60">
-                  {device.chargeState.range} mi
-                </span>
+                <span className="text-[10px] font-mono text-white/30">Range</span>
+                <span className="text-[10px] font-mono text-white/60">{device.chargeState.range} mi</span>
               </div>
             )}
           </>
         )}
         {(device.temperatureState?.currentTemperature != null || device.currentTemperature != null) && (
           <div className="flex justify-between">
-            <span className="text-[10px] font-mono text-white/30">
-              Current temp
-            </span>
+            <span className="text-[10px] font-mono text-white/30">Current temp</span>
             <span className="text-[10px] font-mono text-white/60">
               {device.temperatureState?.currentTemperature ?? device.currentTemperature}°C
             </span>
@@ -192,21 +164,15 @@ function DeviceCard({
         )}
         {device.thermostatState?.heatSetpoint != null && (
           <div className="flex justify-between">
-            <span className="text-[10px] font-mono text-white/30">
-              Heat setpoint
-            </span>
-            <span className="text-[10px] font-mono text-[#22c55e]">
-              {device.thermostatState.heatSetpoint}°C
-            </span>
+            <span className="text-[10px] font-mono text-white/30">Heat setpoint</span>
+            <span className="text-[10px] font-mono text-[#22c55e]">{device.thermostatState.heatSetpoint}°C</span>
           </div>
         )}
         {(device.thermostatState?.mode || device.operationMode) && (
           <div className="flex justify-between">
             <span className="text-[10px] font-mono text-white/30">Mode</span>
             <span className={`text-[10px] font-mono ${
-              (device.thermostatState?.mode ?? device.operationMode) === "OFF"
-                ? "text-red-400/60"
-                : "text-[#22c55e]"
+              (device.thermostatState?.mode ?? device.operationMode) === "OFF" ? "text-red-400/60" : "text-[#22c55e]"
             }`}>
               {device.thermostatState?.mode ?? device.operationMode}
             </span>
@@ -215,53 +181,35 @@ function DeviceCard({
         {device.thermostatState?.holdType && (
           <div className="flex justify-between">
             <span className="text-[10px] font-mono text-white/30">Hold</span>
-            <span className="text-[10px] font-mono text-white/60">
-              {device.thermostatState.holdType}
-            </span>
+            <span className="text-[10px] font-mono text-white/60">{device.thermostatState.holdType}</span>
           </div>
         )}
         {device.capabilities?.capableModes && (
           <div className="flex justify-between">
             <span className="text-[10px] font-mono text-white/30">Modes</span>
-            <span className="text-[10px] font-mono text-white/40">
-              {device.capabilities.capableModes.join(", ")}
-            </span>
+            <span className="text-[10px] font-mono text-white/40">{device.capabilities.capableModes.join(", ")}</span>
           </div>
         )}
         {device.productionState && (
           <>
             <div className="flex justify-between">
-              <span className="text-[10px] font-mono text-white/30">
-                Producing
-              </span>
-              <span
-                className={`text-[10px] font-mono ${
-                  device.productionState.isProducing
-                    ? "text-[#22c55e]"
-                    : "text-white/40"
-                }`}
-              >
+              <span className="text-[10px] font-mono text-white/30">Producing</span>
+              <span className={`text-[10px] font-mono ${device.productionState.isProducing ? "text-[#22c55e]" : "text-white/40"}`}>
                 {device.productionState.isProducing ? "YES" : "NO"}
               </span>
             </div>
             {device.productionState.productionRate != null && (
               <div className="flex justify-between">
-                <span className="text-[10px] font-mono text-white/30">
-                  Output
-                </span>
-                <span className="text-[10px] font-mono text-white/60">
-                  {device.productionState.productionRate} kW
-                </span>
+                <span className="text-[10px] font-mono text-white/30">Output</span>
+                <span className="text-[10px] font-mono text-white/60">{device.productionState.productionRate} kW</span>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* Action buttons */}
       <div className="space-y-2">
-        {(device.deviceType === "charger" ||
-          device.deviceType === "vehicle") && (
+        {(device.deviceType === "charger" || device.deviceType === "vehicle") && (
           <div className="flex gap-2">
             <button
               onClick={() => onAction(device.id, device.deviceType, "START")}
@@ -341,7 +289,6 @@ export default function DevicesPage() {
     setLog((prev) => [...prev, { time: ts(), msg, type }]);
   }, []);
 
-  // Initial log entries — client-side only to avoid hydration mismatch
   useEffect(() => {
     setLog([
       { time: ts(), msg: "Enode Sandbox Device Controller initialized", type: "info" },
@@ -349,12 +296,6 @@ export default function DevicesPage() {
     ]);
   }, []);
 
-  /* -- API calls --------------------------------------------------- */
-
-  /**
-   * In Enode, users are created implicitly when you generate a Link session.
-   * So "Connect Devices" does both: creates the user + returns a Link URL.
-   */
   const handleConnectDevices = async () => {
     if (!userId.trim()) return;
     setLoading(true);
@@ -391,10 +332,7 @@ export default function DevicesPage() {
       const data = await res.json();
       if (data.ok) {
         setDevices(data.devices);
-        addLog(
-          `Found ${data.devices.length} device(s) for user "${activeUserId}"`,
-          "ok"
-        );
+        addLog(`Found ${data.devices.length} device(s) for user "${activeUserId}"`, "ok");
       } else {
         addLog(`Error fetching devices: ${data.error}`, "err");
       }
@@ -429,7 +367,6 @@ export default function DevicesPage() {
           `Action ${act.kind} → ${act.state} (id: ${act.id.slice(0, 8)}…)`,
           act.state === "FAILED" ? "err" : "ok"
         );
-        // Auto-refresh devices after a short delay
         setTimeout(handleRefreshDevices, 2000);
       } else {
         addLog(`Action failed: ${data.error}`, "err");
@@ -439,11 +376,8 @@ export default function DevicesPage() {
     }
   };
 
-  /* -- Render ------------------------------------------------------ */
-
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-white">
-      {/* Nav */}
       <nav className="flex items-center justify-between h-14 border-b border-white/[0.06] px-8">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
@@ -451,27 +385,16 @@ export default function DevicesPage() {
             blackout
           </a>
           <span className="text-white/20 mx-2">/</span>
-          <span className="text-[13px] font-mono text-white/50">
-            device sandbox
-          </span>
+          <span className="text-[13px] font-mono text-white/50">device sandbox</span>
         </div>
-        <a
-          href="/"
-          className="text-[13px] text-white/40 hover:text-[#22c55e] transition-colors font-mono"
-        >
+        <a href="/" className="text-[13px] text-white/40 hover:text-[#22c55e] transition-colors font-mono">
           ← Back to Home
         </a>
       </nav>
 
       <div className="flex h-[calc(100vh-3.5rem)]">
-        {/* Left: Controls + Devices */}
         <div className="flex-1 overflow-y-auto p-8 space-y-6" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
-          {/* Step 1: Enter User ID & Connect */}
-          <motion.section
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-          >
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
             <h2 className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-3">
               Step 1 — Connect Virtual Devices
             </h2>
@@ -495,19 +418,12 @@ export default function DevicesPage() {
               </button>
             </div>
             {activeUserId && (
-              <p className="text-[11px] font-mono text-[#22c55e]/60 mt-2">
-                ✓ Active user: {activeUserId}
-              </p>
+              <p className="text-[11px] font-mono text-[#22c55e]/60 mt-2">✓ Active user: {activeUserId}</p>
             )}
           </motion.section>
 
-          {/* Step 2: Open Link UI */}
           {linkUrl && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-            >
+            <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
               <h2 className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-3">
                 Step 2 — Open Enode Link UI
               </h2>
@@ -529,18 +445,13 @@ export default function DevicesPage() {
                 </button>
               </div>
               <p className="text-[10px] font-mono text-white/25 mt-2">
-                In the Link UI, choose a vendor (e.g. &quot;Demo&quot;) and connect a virtual charger, thermostat, etc. Then come back here and click Refresh below.
+                In the Link UI, choose a vendor and connect a virtual charger, thermostat, etc. Then come back here and click Refresh below.
               </p>
             </motion.section>
           )}
 
-          {/* Step 3: View & Control Devices (shows after user is set) */}
           {activeUserId && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-            >
+            <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.2 }}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-[11px] font-mono text-white/30 uppercase tracking-widest">
                   Step 3 — Control Devices
@@ -556,9 +467,7 @@ export default function DevicesPage() {
 
               {devices.length === 0 ? (
                 <div className="border border-dashed border-white/[0.08] rounded-lg p-8 text-center">
-                  <p className="text-[12px] font-mono text-white/25">
-                    No devices connected yet.
-                  </p>
+                  <p className="text-[12px] font-mono text-white/25">No devices connected yet.</p>
                   <p className="text-[10px] font-mono text-white/15 mt-1">
                     Use the Link UI above to connect sandbox devices, then click Refresh.
                   </p>
@@ -566,11 +475,7 @@ export default function DevicesPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {devices.map((device) => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onAction={handleDeviceAction}
-                    />
+                    <DeviceCard key={device.id} device={device} onAction={handleDeviceAction} />
                   ))}
                 </div>
               )}
@@ -578,7 +483,6 @@ export default function DevicesPage() {
           )}
         </div>
 
-        {/* Right: Live Log */}
         <div className="w-[380px] border-l border-white/[0.06] flex flex-col flex-shrink-0">
           <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06]">
             <div className="flex gap-1.5">
@@ -586,23 +490,13 @@ export default function DevicesPage() {
               <span className="w-2 h-2 rounded-full bg-[#febc2e]" />
               <span className="w-2 h-2 rounded-full bg-[#28c840]" />
             </div>
-            <span className="text-[10px] font-mono text-white/30 ml-1">
-              enode-sandbox-log
-            </span>
+            <span className="text-[10px] font-mono text-white/30 ml-1">enode-sandbox-log</span>
             <div className="ml-auto flex items-center gap-1.5">
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-[#22c55e]"
-                style={{ animation: "pulse-dot 2s ease-in-out infinite" }}
-              />
-              <span className="text-[9px] font-mono text-[#22c55e]/60">
-                LIVE
-              </span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" style={{ animation: "pulse-dot 2s ease-in-out infinite" }} />
+              <span className="text-[9px] font-mono text-[#22c55e]/60">LIVE</span>
             </div>
           </div>
-          <div
-            className="flex-1 overflow-y-auto p-4 space-y-1"
-            style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}
-          >
+          <div className="flex-1 overflow-y-auto p-4 space-y-1" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
             {log.map((entry, i) => (
               <motion.div
                 key={i}
