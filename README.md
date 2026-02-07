@@ -1,6 +1,6 @@
 # void
 
-void is a full-stack grid intelligence platform that forecasts electricity prices, simulates cascade failures across the Texas power grid, dispatches repair crews, and gives consumers real-time alerts to shift their energy usage. It combines a 2,173-node synthetic grid model with historical ERCOT load data, live weather from Open-Meteo, and an XGBoost price prediction model trained on 43,818 hourly records.
+void is a full-stack grid intelligence platform that simulates extreme weather with a planetary AI weather model, predicts electricity prices, runs cascade failure propagation across the Texas power grid, dispatches repair crews, and gives consumers real-time alerts to shift their energy usage. It combines a 2,173-node synthetic grid model with historical ERCOT load data, live weather from Open-Meteo, and an XGBoost price prediction model trained on 43,818 hourly records.
 
 Built for the scenario where Winter Storm Uri hits again and the grid needs to respond in real time.
 
