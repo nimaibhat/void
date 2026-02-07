@@ -1,4 +1,4 @@
-"""Simulate Service — chains weather → demand → cascade for the
+"""Simulate Service — chains demand → cascade for the
 POST /api/simulate/cascade endpoint.
 """
 
@@ -11,7 +11,6 @@ from typing import Any, Dict
 from app.services import demand_service
 from app.services.cascade_service import run_cascade
 from app.services.grid_graph_service import grid_graph
-from app.services.weather_service import weather_service
 
 logger = logging.getLogger("blackout.simulate_service")
 
@@ -21,7 +20,7 @@ async def run_cascade_simulation(
     forecast_hour: int,
     region: str,
 ) -> Dict[str, Any]:
-    """Full pipeline: fetch weather → compute demand → run cascade.
+    """Full pipeline: compute demand from ERCOT data → run cascade.
 
     Parameters
     ----------
@@ -32,23 +31,15 @@ async def run_cascade_simulation(
     region : str
         ISO region (currently only ERCOT has real grid data).
     """
-    # 1. Fetch city temperatures from the weather service.
-    city_forecasts = None
-    if weather_service.model_loaded:
-        try:
-            dt = datetime.fromisoformat(start_time_str).replace(tzinfo=timezone.utc)
-            city_forecasts = await weather_service.get_city_forecasts(dt)
-        except Exception as exc:
-            logger.warning("Weather fetch failed, using fallback temps: %s", exc)
+    # Determine scenario from start_time
+    scenario = "uri" if "2021-02" in start_time_str else "normal"
 
-    city_temps = demand_service.get_city_temps_for_hour(city_forecasts, forecast_hour)
-
-    # 2. Compute demand multipliers for every grid node.
+    # Compute demand multipliers from real ERCOT data
     multipliers = demand_service.compute_demand_multipliers(
-        city_temps, forecast_hour, region=region
+        scenario=scenario, forecast_hour=forecast_hour
     )
 
-    # 3. Run the cascade simulation on a deep copy of the grid.
+    # Run the cascade simulation on a deep copy of the grid
     result = run_cascade(
         graph=grid_graph.graph,
         demand_multipliers=multipliers,

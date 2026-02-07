@@ -19,19 +19,19 @@ _NORMAL_PRICE_MWH = 35.0
 _URI_PEAK_PRICE_MWH = 9000.0
 
 
-def _count_affected_regions(failed_ids: list[str]) -> int:
-    """Count distinct region prefixes among failed nodes."""
-    prefixes: Set[str] = set()
+def _count_affected_zones(failed_ids: list[str]) -> int:
+    """Count distinct weather zones among failed nodes."""
+    zones: Set[str] = set()
     for nid in failed_ids:
-        prefixes.add(nid.split("_")[0])
-    return len(prefixes)
+        if nid in grid_graph.graph.nodes:
+            zones.add(grid_graph.graph.nodes[nid]["weather_zone"])
+    return len(zones)
 
 
 def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     """Run cascade with and without Blackout optimization, compare results."""
 
     if scenario != "uri":
-        # Normal scenario: no cascade, minimal impact
         normal_outcome = ScenarioOutcome(
             scenario_name="Without Blackout",
             total_affected_customers=0,
@@ -50,9 +50,8 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
         )
 
     # ── Without Blackout: full Uri demand, no mitigation ────────────
-    city_temps_uri = demand_service.URI_FALLBACK_TEMPS
     multipliers_raw = demand_service.compute_demand_multipliers(
-        city_temps_uri, forecast_hour=36, region="ERCOT"
+        scenario="uri", forecast_hour=36
     )
 
     result_without = run_cascade(
@@ -65,11 +64,10 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     failed_without = result_without["total_failed_nodes"]
     shed_without = result_without["total_load_shed_mw"]
     customers_without = int(shed_without * _CUSTOMERS_PER_MW)
-    regions_without = _count_affected_regions(result_without["failed_node_ids"])
+    regions_without = _count_affected_zones(result_without["failed_node_ids"])
     steps_without = result_without["cascade_depth"]
 
     # ── With Blackout: 12% demand reduction + crew repair factor ────
-    # Consumer optimization reduces demand by ~12%
     multipliers_mitigated = {
         nid: mult * 0.88 for nid, mult in multipliers_raw.items()
     }
@@ -84,15 +82,14 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     failed_with = result_with["total_failed_nodes"]
     shed_with = result_with["total_load_shed_mw"]
     customers_with = int(shed_with * _CUSTOMERS_PER_MW)
-    regions_with = _count_affected_regions(result_with["failed_node_ids"])
+    regions_with = _count_affected_zones(result_with["failed_node_ids"])
     steps_with = result_with["cascade_depth"]
 
     # ── Price impact ────────────────────────────────────────────────
-    # With Blackout reduces peak price proportionally to demand reduction
-    price_with = round(_URI_PEAK_PRICE_MWH * 0.55, 2)  # ~45% reduction from optimization
+    price_with = round(_URI_PEAK_PRICE_MWH * 0.55, 2)
 
     # ── Blackout duration ───────────────────────────────────────────
-    duration_without = 48.0  # Full Uri: ~48 hours of rolling blackouts
+    duration_without = 48.0
     duration_with = max(0, duration_without * (failed_with / max(failed_without, 1)))
 
     # ── Build comparison ────────────────────────────────────────────

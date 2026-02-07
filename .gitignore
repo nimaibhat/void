@@ -40,6 +40,9 @@ yarn-error.log*
 # weather forecast cache
 /backend/cache/
 
+# large data files (MATPOWER, ERCOT xlsx)
+/backend/app/data/
+
 # python
 __pycache__/
 *.pyc
