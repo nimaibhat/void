@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -19,6 +20,7 @@ type DeviceId =
 type GridRegion = "ERCOT" | "CAISO" | "PJM-NYISO" | "MISO" | "SPP";
 
 export interface ConsumerProfile {
+  id: string;
   name: string;
   emoji: string;
   location: string;
@@ -40,52 +42,71 @@ interface ConsumerProfileModalProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Constants                                                          */
+/*  Supabase → ConsumerProfile mapping                                 */
 /* ------------------------------------------------------------------ */
-const PREMADE_PROFILES: ConsumerProfile[] = [
-  {
-    name: "Martinez Family",
-    emoji: "👨‍👩‍👧‍👦",
-    location: "Austin, TX",
-    zip: "78701",
-    homeType: "Single Family",
-    sqft: 2400,
-    gridRegion: "ERCOT",
-    devices: ["thermostat", "ev_charger", "battery", "solar", "pool_pump"],
-    threat: "Ice storm — 36hr ETA",
-    severity: 3,
-    readiness: 94,
-    status: "PROTECTED",
-  },
-  {
-    name: "Priya Sharma",
-    emoji: "👩‍💻",
-    location: "Los Angeles, CA",
-    zip: "90012",
-    homeType: "Apartment",
-    sqft: 950,
-    gridRegion: "CAISO",
-    devices: ["thermostat", "smart_plugs"],
-    threat: "Heat wave — active",
-    severity: 4,
-    readiness: 72,
-    status: "AT RISK",
-  },
-  {
-    name: "James & Linda",
-    emoji: "👴👵",
-    location: "New York, NY",
-    zip: "10001",
-    homeType: "Condo",
-    sqft: 1200,
-    gridRegion: "PJM-NYISO",
-    devices: ["thermostat", "battery", "generator"],
-    threat: "Winter storm watch",
-    severity: 2,
-    readiness: 88,
-    status: "PREPARED",
-  },
-];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSupabaseRow(row: any): ConsumerProfile {
+  const deviceTypeMap: Record<string, DeviceId> = {
+    thermostat: "thermostat",
+    ev_charger: "ev_charger",
+    battery: "battery",
+    solar_inverter: "solar",
+    smart_plug: "smart_plugs",
+    smart_water_heater: "thermostat",
+    dryer: "smart_plugs",
+    pool_pump: "pool_pump",
+    generator: "generator",
+  };
+
+  const devices: DeviceId[] = (row.smart_devices ?? [])
+    .map((d: { type: string }) => deviceTypeMap[d.type])
+    .filter(Boolean);
+
+  const threats = row.active_threats ?? [];
+  const topThreat = threats[0];
+
+  const homeTypeLower = (row.home_type ?? "").toLowerCase();
+  let homeType: HomeType = "Single Family";
+  if (homeTypeLower.includes("apartment")) homeType = "Apartment";
+  else if (homeTypeLower.includes("condo")) homeType = "Condo";
+  else if (homeTypeLower.includes("townhouse") || homeTypeLower.includes("brownstone")) homeType = "Townhouse";
+
+  let gridRegion: GridRegion = "ERCOT";
+  const gr = (row.grid_region ?? "").toUpperCase().replace(/\s*\/\s*/g, "-");
+  if (gr.includes("CAISO")) gridRegion = "CAISO";
+  else if (gr.includes("PJM") || gr.includes("NYISO")) gridRegion = "PJM-NYISO";
+  else if (gr.includes("MISO")) gridRegion = "MISO";
+  else if (gr.includes("SPP")) gridRegion = "SPP";
+
+  const severity = Math.min(4, Math.max(2, topThreat?.severity ?? 2)) as SeverityLevel;
+
+  const threatLabel = topThreat
+    ? `${topThreat.event} — ${topThreat.area}`
+    : "No active threats";
+
+  const emojiMap: Record<string, string> = {
+    "Single Family": "👨‍👩‍👧‍👦",
+    Apartment: "🏢",
+    Condo: "🏠",
+    Townhouse: "🏘️",
+  };
+
+  return {
+    id: row.id,
+    name: row.name,
+    emoji: emojiMap[homeType] ?? "🏠",
+    location: [row.city, row.state].filter(Boolean).join(", ") || `ZIP ${row.zip_code}`,
+    zip: row.zip_code,
+    homeType,
+    sqft: row.square_footage ?? 0,
+    gridRegion,
+    devices,
+    threat: threatLabel,
+    severity,
+    readiness: row.readiness_score ?? 0,
+    status: row.status ?? "UNKNOWN",
+  };
+}
 
 const DEVICE_EMOJI: Record<DeviceId, string> = {
   thermostat: "🌡️",
@@ -176,6 +197,30 @@ export default function ConsumerProfileModal({
   const modalRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<ConsumerProfile | null>(null);
   const [customZip, setCustomZip] = useState("");
+  const [profiles, setProfiles] = useState<ConsumerProfile[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch profiles from Supabase on open
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setLoading(true);
+    supabase
+      .from("consumer_profiles")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          console.error("Failed to fetch profiles:", error);
+          setProfiles([]);
+        } else {
+          setProfiles(data.map(mapSupabaseRow));
+        }
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   // ESC to close
   useEffect(() => {
@@ -245,6 +290,7 @@ export default function ConsumerProfileModal({
   const handleCustomSubmit = () => {
     if (customZip.length < 5) return;
     const profile: ConsumerProfile = {
+      id: `custom-${customZip}`,
       name: "Custom Home",
       emoji: "🏠",
       location: `ZIP ${customZip}`,
@@ -383,15 +429,25 @@ export default function ConsumerProfileModal({
 
               {/* Profile rows */}
               <div className="space-y-3">
-                {PREMADE_PROFILES.map((profile, i) => (
-                  <ProfileRow
-                    key={profile.name}
-                    profile={profile}
-                    index={i}
-                    selected={selected?.name === profile.name}
-                    onSelect={handleSelect}
-                  />
-                ))}
+                {loading ? (
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-[11px] font-mono text-white/30 text-center py-8"
+                  >
+                    loading profiles...
+                  </motion.p>
+                ) : (
+                  profiles.map((profile, i) => (
+                    <ProfileRow
+                      key={profile.id}
+                      profile={profile}
+                      index={i}
+                      selected={selected?.id === profile.id}
+                      onSelect={handleSelect}
+                    />
+                  ))
+                )}
               </div>
             </div>
 

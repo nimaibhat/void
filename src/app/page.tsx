@@ -20,6 +20,7 @@ import {
 import { TbBrandNetbeans } from "react-icons/tb";
 import { FaChartBar } from "react-icons/fa";
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { IconType } from "react-icons";
 
 const ParticleGlobe = dynamic(() => import("@/components/ParticleGlobe"), {
@@ -749,11 +750,11 @@ function AnimatedStat({
 /*  Main page                                                         */
 /* ------------------------------------------------------------------ */
 export default function Home() {
+  const router = useRouter();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const handleProfileSelect = (profile: ConsumerProfile) => {
-    console.log("Profile selected for dashboard:", profile);
-    // TODO: route to citizen dashboard with profile data
+    router.push(`/dashboard?id=${profile.id}`);
   };
 
   return (
