@@ -15,10 +15,13 @@ Returns step-by-step failure progression for frontend animation.
 from __future__ import annotations
 
 import copy
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Set
 
 import networkx as nx
+
+logger = logging.getLogger("blackout.cascade")
 
 MAX_CASCADE_ITERATIONS = 20
 REDISTRIBUTION_FACTOR = 0.70
@@ -59,6 +62,12 @@ def run_cascade(
     """
     started = datetime.now(timezone.utc)
     g = copy.deepcopy(graph)
+
+    logger.info(
+        f"Starting cascade simulation: scenario={scenario_label}, "
+        f"forecast_hour={forecast_hour}, nodes={g.number_of_nodes()}, "
+        f"weather_zones={len(weather_by_zone) if weather_by_zone else 0}"
+    )
 
     # ── Step 0: Apply demand multipliers ────────────────────────────
     for nid in g.nodes:
@@ -108,7 +117,7 @@ def run_cascade(
                     g.nodes[nid]["current_load"] = 0
 
         if cold_weather_failures:
-            # Record initial weather-driven failures as step 0
+            # Record initial weather-driven failures as step -1 (pre-cascade)
             steps.append({
                 "step": -1,  # Pre-cascade step
                 "new_failures": [
@@ -116,14 +125,21 @@ def run_cascade(
                         "id": nid,
                         "lat": g.nodes[nid]["lat"],
                         "lon": g.nodes[nid]["lon"],
-                        "reason": f"Cold weather failure ({weather_by_zone.get(g.nodes[nid]['weather_zone'], {}).get('temp_f', 0):.0f}°F)",
-                        "capacity_mw": g.nodes[nid]["capacity_mw"],
+                        "load_mw": 0.0,  # Cold-weather failures have load set to 0
+                        "capacity_mw": round(g.nodes[nid]["capacity_mw"], 1),
                     }
                     for nid in cold_weather_failures
                 ],
                 "reroutes": [],
                 "total_failed": len(failed),
+                "total_load_shed_mw": 0.0,  # No load shed yet, just failures
             })
+            logger.info(
+                f"Cold-weather pre-failures: {len(cold_weather_failures)} nodes failed "
+                f"({len(cold_weather_failures)/g.number_of_nodes()*100:.1f}% of grid)"
+            )
+        else:
+            logger.info("No cold-weather failures (weather_by_zone not provided or no extreme cold)")
 
     # ── Iterative cascade ───────────────────────────────────────────
     for iteration in range(MAX_CASCADE_ITERATIONS):
@@ -141,6 +157,12 @@ def run_cascade(
             break
 
         failed.update(new_failures)
+
+        # Log iteration progress
+        logger.info(
+            f"Cascade iteration {iteration}: {len(new_failures)} new failures, "
+            f"{len(failed)} total failed ({len(failed)/g.number_of_nodes()*100:.1f}% of grid)"
+        )
 
         # Redistribute load from newly failed nodes and track reroutes.
         reroutes: List[Dict[str, Any]] = []
@@ -211,6 +233,15 @@ def run_cascade(
     )
 
     completed = datetime.now(timezone.utc)
+    duration_ms = (completed - started).total_seconds() * 1000
+
+    logger.info(
+        f"Cascade simulation complete: "
+        f"{len(failed)}/{g.number_of_nodes()} nodes failed ({len(failed)/g.number_of_nodes()*100:.1f}%), "
+        f"{len(steps)} cascade steps, "
+        f"{total_shed:.0f} MW shed, "
+        f"duration={duration_ms:.0f}ms"
+    )
 
     return {
         "scenario": scenario_label,

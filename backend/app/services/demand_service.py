@@ -155,6 +155,10 @@ def _predict_zone_demand(zone_weather: Dict[str, List[Dict[str, float]]],
 
         pred = model.predict(features)[0]
         zone_demands[zone_name] = max(0, pred)
+        logger.debug(
+            f"ML prediction for {zone_name}: {pred:.0f} MW "
+            f"(temp={temp:.1f}°F, feels_like={feels:.1f}°F, hour={ts.hour})"
+        )
 
     if not zone_demands:
         return {}
@@ -170,6 +174,12 @@ def _predict_zone_demand(zone_weather: Dict[str, List[Dict[str, float]]],
     for zone_name in zone_demands:
         share = zone_demands[zone_name] / total_pred
         zone_demands[zone_name] = share * avg_pred
+
+    logger.info(
+        f"Live ML predictions - Total: {sum(zone_demands.values()):.0f} MW, "
+        f"Zones: {len(zone_demands)}, "
+        f"Range: {min(zone_demands.values()):.0f}-{max(zone_demands.values()):.0f} MW"
+    )
 
     return zone_demands
 
@@ -188,6 +198,8 @@ def compute_demand_multipliers(
       - "normal"           : Baseline ERCOT load from Feb 1 2021
       - "live"             : Real-time weather → ML model → predicted demand
     """
+    logger.info(f"Computing demand multipliers for scenario={scenario}, forecast_hour={forecast_hour}")
+
     if scenario == "live":
         return _compute_live_multipliers(forecast_hour)
 
@@ -197,11 +209,22 @@ def compute_demand_multipliers(
     if not zone_loads:
         logger.warning("No ERCOT load data for scenario=%s hour=%d, using defaults", scenario, forecast_hour)
         if scenario in ("uri", "uri_2021"):
-            return {nid: 2.5 for nid in grid_graph.get_node_ids()}
-        return {nid: 1.0 for nid in grid_graph.get_node_ids()}
+            fallback_mult = 2.5
+            logger.info(f"Using fallback multiplier: {fallback_mult} for all nodes")
+            return {nid: fallback_mult for nid in grid_graph.get_node_ids()}
+        fallback_mult = 1.0
+        logger.info(f"Using fallback multiplier: {fallback_mult} for all nodes")
+        return {nid: fallback_mult for nid in grid_graph.get_node_ids()}
 
     # For Uri: uplift served load to estimate true demand
     uplift = URI_DEMAND_UPLIFT if scenario in ("uri", "uri_2021") else 1.0
+
+    logger.info(
+        f"Historical scenario loads - Total: {sum(zone_loads.values()):.0f} MW, "
+        f"Zones: {len(zone_loads)}, "
+        f"Range: {min(zone_loads.values()):.0f}-{max(zone_loads.values()):.0f} MW, "
+        f"Uplift: {uplift:.2f}x"
+    )
 
     return _distribute_zone_loads(zone_loads, uplift)
 
@@ -245,5 +268,16 @@ def _distribute_zone_loads(zone_loads: Dict[str, float],
             multiplier = 1.0
 
         multipliers[nid] = round(multiplier, 4)
+
+    # Log multiplier statistics for debugging
+    if multipliers:
+        min_mult = min(multipliers.values())
+        max_mult = max(multipliers.values())
+        avg_mult = sum(multipliers.values()) / len(multipliers)
+        logger.info(
+            f"Demand multipliers computed (uplift={uplift:.2f}): "
+            f"min={min_mult:.2f}, max={max_mult:.2f}, avg={avg_mult:.2f}, "
+            f"nodes={len(multipliers)}"
+        )
 
     return multipliers
