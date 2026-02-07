@@ -30,6 +30,7 @@ export interface EventData {
 interface OperatorRightSidebarProps {
   crews?: CrewData[];
   events?: EventData[];
+  crewCoverage?: number;
   onFocusLocation: (location: { lat: number; lng: number; altitude?: number }) => void;
 }
 
@@ -179,6 +180,7 @@ function EventRow({
 export default function OperatorRightSidebar({
   crews = DEFAULT_CREWS,
   events: initialEvents = DEFAULT_EVENTS,
+  crewCoverage = 76,
   onFocusLocation,
 }: OperatorRightSidebarProps) {
   const [activeTab, setActiveTab] = useState<"crews" | "feed">("crews");
@@ -286,17 +288,18 @@ export default function OperatorRightSidebar({
             </span>
             <div className="flex items-baseline gap-1">
               <span className="text-5xl font-mono font-bold text-[#22c55e] leading-none">
-                47
+                {deployed + enRoute}
               </span>
               <span className="text-2xl font-mono text-[#3f3f46]">/</span>
-              <span className="text-2xl font-mono text-[#71717a]">62</span>
+              <span className="text-2xl font-mono text-[#71717a]">{total}</span>
             </div>
             <div className="h-2.5 rounded-full bg-[#1a1a1a] overflow-hidden w-full mt-3">
               <div
                 className="h-full rounded-full bg-[#22c55e] transition-all duration-1000"
-                style={{ width: `${(47 / 62) * 100}%` }}
+                style={{ width: `${Math.round(crewCoverage)}%` }}
               />
             </div>
+            <span className="text-xs text-[#3f3f46] mt-1 block">{Math.round(crewCoverage)}% coverage</span>
           </div>
 
           {/* Summary bar */}

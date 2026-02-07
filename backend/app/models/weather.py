@@ -1,4 +1,4 @@
-"""Pydantic models for SFNO weather forecast endpoints."""
+"""Pydantic models for weather forecast endpoints (Open-Meteo API)."""
 
 from datetime import datetime
 from typing import Dict, List
@@ -31,7 +31,7 @@ class GridTimestep(BaseModel):
 
 
 class SFNOGridForecast(BaseModel):
-    model: str = "earth2studio-sfno"
+    model: str = "open-meteo"
     start_time: str
     region: str
     generated_at: str
@@ -57,7 +57,7 @@ class CityForecast(BaseModel):
 
 
 class CitiesForecastResponse(BaseModel):
-    model: str = "earth2studio-sfno"
+    model: str = "open-meteo"
     start_time: str
     generated_at: str
     cities: Dict[str, CityForecast]

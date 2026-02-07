@@ -1,12 +1,11 @@
-"""SFNO Weather Forecasting Service — powered by NVIDIA Earth2Studio.
+"""Weather Forecasting Service — powered by Open-Meteo API.
 
-Loads the SFNO (Spherical Fourier Neural Operator) model once on startup,
-runs 48-hour deterministic forecasts on a 0.25-degree global grid, and
-extracts US-region grids and city-level point forecasts.
+Fetches hourly weather forecasts from the free Open-Meteo API.
+No GPU, no heavy ML dependencies — just HTTP calls.
 
-Grid: 721 lat x 1440 lon, 0.25-degree equirectangular.
+Grid: sparse ~25-point grid over Texas/ERCOT region.
+City: 7 hardcoded US cities with exact lat/lon lookups.
 Time step: 6 hours.  Default run: 8 steps = 48 hours.
-Data sources: ARCO (ERA5 reanalysis) for historical, GFS for recent.
 """
 
 from __future__ import annotations
@@ -14,29 +13,30 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
+import httpx
 
 logger = logging.getLogger("blackout.weather")
+
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 
 # ── Custom exceptions ───────────────────────────────────────────────
 
 
 class ModelNotLoadedError(Exception):
-    """SFNO model has not been loaded (or failed to load)."""
+    """Weather service has not been initialized."""
 
 
 class DataFetchError(Exception):
-    """Failed to fetch initial-condition data from ARCO/GFS."""
+    """Failed to fetch data from Open-Meteo API."""
 
 
 class GPUOutOfMemoryError(Exception):
-    """GPU ran out of VRAM during inference."""
+    """Kept for interface compatibility — never raised with Open-Meteo."""
 
     def __init__(self, message: str, vram_used_gb: float = 0.0):
         super().__init__(message)
@@ -70,42 +70,54 @@ def resolve_city_name(raw: str) -> Optional[str]:
     return _CITY_LOOKUP.get(normalized)
 
 
-# ── US region bounds ────────────────────────────────────────────────
-# SFNO uses 0-360 longitude convention (ERA5).
-# US CONUS: lat 24-50 N, lon 235-294 E  (= -125 to -66 W).
+# ── Texas / ERCOT region grid points ────────────────────────────────
+# Sparse grid covering Texas: lat 25.5–36.5 N, lon -106.5 – -93.5 W
+# Step ~2.75 degrees → 5 lat x 5 lon = 25 points
 
-US_LAT_MIN, US_LAT_MAX = 24.0, 50.0
-US_LON_MIN_360, US_LON_MAX_360 = 235.0, 294.0
-
-# Variables to extract from SFNO output.
-# Maps our internal key -> list of possible names in the zarr output.
-_VAR_ALIASES: Dict[str, List[str]] = {
-    "t2m": ["t2m", "2t", "2m_temperature"],
-    "u10m": ["u10m", "u10", "10u", "10m_u_component_of_wind"],
-    "v10m": ["v10m", "v10", "10v", "10m_v_component_of_wind"],
-    "msl": ["msl", "mean_sea_level_pressure", "sp"],
-    "tcwv": ["tcwv", "total_column_water_vapour", "total_column_water_vapor"],
-}
+_TX_LAT_MIN, _TX_LAT_MAX = 25.5, 36.5
+_TX_LON_MIN, _TX_LON_MAX = -106.5, -93.5
+_GRID_STEPS = 5  # 5x5 grid
 
 
-# ── Unit conversions ────────────────────────────────────────────────
+def _build_grid_points() -> List[Tuple[float, float]]:
+    """Return a list of (lat, lon) for the sparse Texas grid."""
+    lat_step = (_TX_LAT_MAX - _TX_LAT_MIN) / (_GRID_STEPS - 1)
+    lon_step = (_TX_LON_MAX - _TX_LON_MIN) / (_GRID_STEPS - 1)
+    points = []
+    for i in range(_GRID_STEPS):
+        for j in range(_GRID_STEPS):
+            lat = round(_TX_LAT_MIN + i * lat_step, 2)
+            lon = round(_TX_LON_MIN + j * lon_step, 2)
+            points.append((lat, lon))
+    return points
 
 
-def _kelvin_to_f(k: np.ndarray) -> np.ndarray:
-    return (k - 273.15) * 9.0 / 5.0 + 32.0
+GRID_POINTS = _build_grid_points()
+GRID_LATS = sorted(set(p[0] for p in GRID_POINTS), reverse=True)  # N → S
+GRID_LONS = sorted(set(p[1] for p in GRID_POINTS))  # W → E
 
 
-def _ms_to_mph(ms: np.ndarray) -> np.ndarray:
-    return ms * 2.23694
+# ── Open-Meteo fetcher ──────────────────────────────────────────────
 
 
-def _pa_to_hpa(pa: np.ndarray) -> np.ndarray:
-    return pa / 100.0
-
-
-def _wind_direction_deg(u: np.ndarray, v: np.ndarray) -> np.ndarray:
-    """Meteorological wind direction (direction wind blows FROM), degrees."""
-    return (np.degrees(np.arctan2(-u, -v)) + 360.0) % 360.0
+async def _fetch_open_meteo(
+    client: httpx.AsyncClient,
+    lat: float,
+    lon: float,
+    hours: int = 48,
+) -> Dict[str, Any]:
+    """Fetch hourly forecast for a single lat/lon point."""
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure",
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "forecast_hours": hours,
+    }
+    resp = await client.get(OPEN_METEO_URL, params=params)
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -114,7 +126,7 @@ def _wind_direction_deg(u: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 
 class WeatherService:
-    """Singleton service wrapping SFNO model inference and caching.
+    """Singleton service wrapping Open-Meteo API calls and caching.
 
     Usage
     -----
@@ -128,42 +140,14 @@ class WeatherService:
         self.load_error: Optional[str] = None
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._gpu_name: str = "N/A"
+        self._gpu_name: str = "N/A (Open-Meteo API)"
 
     # ── Model lifecycle ─────────────────────────────────────────────
 
     async def load_model(self) -> None:
-        """Load SFNO model onto GPU.  Called once during FastAPI lifespan."""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._load_model_sync)
-
-    def _load_model_sync(self) -> None:
-        try:
-            import torch
-            from earth2studio.models.px import SFNO
-
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            logger.info("Loading SFNO model on %s …", device)
-
-            if torch.cuda.is_available():
-                self._gpu_name = torch.cuda.get_device_name(0)
-                props = torch.cuda.get_device_properties(0)
-                vram_gb = props.total_mem / (1024**3)
-                logger.info("GPU: %s  |  VRAM: %.1f GB", self._gpu_name, vram_gb)
-
-            package = SFNO.load_default_package()
-            self.model = SFNO.load_model(package)
-            self.model_loaded = True
-
-            if torch.cuda.is_available():
-                used_gb = torch.cuda.memory_allocated(0) / (1024**3)
-                logger.info("SFNO loaded.  VRAM used: %.2f GB", used_gb)
-            else:
-                logger.info("SFNO loaded (CPU mode — inference will be slow).")
-
-        except Exception as exc:
-            self.load_error = str(exc)
-            logger.error("Failed to load SFNO model: %s", exc)
+        """No-op — Open-Meteo needs no model loading."""
+        self.model_loaded = True
+        logger.info("Weather service ready (Open-Meteo API — no model to load)")
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -185,13 +169,12 @@ class WeatherService:
         steps: int = 8,
         force: bool = False,
     ) -> Dict[str, Any]:
-        """Run SFNO inference.  Returns processed forecast dict.
+        """Fetch grid forecast from Open-Meteo.
 
         Raises
         ------
-        ModelNotLoadedError  – if the model was never loaded.
-        DataFetchError       – if ARCO/GFS data fetch fails.
-        GPUOutOfMemoryError  – if the GPU runs out of VRAM.
+        ModelNotLoadedError  – if load_model() was never called.
+        DataFetchError       – if Open-Meteo API calls fail.
         """
         cache_key = self._cache_key(start_time)
 
@@ -202,14 +185,10 @@ class WeatherService:
 
         if not self.model_loaded:
             raise ModelNotLoadedError(
-                self.load_error or "SFNO model is not loaded"
+                self.load_error or "Weather service is not initialized"
             )
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, self._run_inference_sync, start_time, steps
-        )
-
+        result = await self._fetch_grid_forecast(start_time, steps)
         self._save_to_cache(cache_key, result)
         return result
 
@@ -217,249 +196,216 @@ class WeatherService:
         self,
         start_time: datetime,
     ) -> Dict[str, Any]:
-        """Get city-level point forecasts (runs grid forecast if needed)."""
-        forecast = await self.get_forecast(start_time)
-        return self._extract_cities(forecast)
+        """Get city-level point forecasts directly from Open-Meteo."""
+        if not self.model_loaded:
+            raise ModelNotLoadedError("Weather service is not initialized")
+
+        cache_key = self._cache_key(start_time) + "_cities"
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        result = await self._fetch_city_forecasts(start_time)
+        self._save_to_cache(cache_key, result)
+        return result
 
     def get_status(self) -> Dict[str, Any]:
-        """Return model / GPU / cache status info."""
-        vram_used = 0.0
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                vram_used = torch.cuda.memory_allocated(0) / (1024**3)
-        except ImportError:
-            pass
-
+        """Return service / cache status info."""
         cached = sorted(p.stem for p in self.cache_dir.glob("*.json"))
         return {
             "model_loaded": self.model_loaded,
             "gpu_name": self._gpu_name,
             "cached_scenarios": cached,
-            "vram_used_gb": round(vram_used, 2),
+            "vram_used_gb": 0.0,
         }
 
-    # ── Inference (blocking — runs inside thread executor) ──────────
+    # ── Grid forecast (Open-Meteo) ──────────────────────────────────
 
-    def _run_inference_sync(
+    async def _fetch_grid_forecast(
         self, start_time: datetime, steps: int
     ) -> Dict[str, Any]:
-        import torch
-
-        try:
-            from earth2studio.data import ARCO, GFS
-            from earth2studio.io import ZarrBackend
-            from earth2studio.run import deterministic
-        except ImportError as exc:
-            raise ModelNotLoadedError(
-                f"earth2studio is not installed: {exc}"
-            ) from exc
-
-        # ARCO for historical (ERA5 reanalysis); GFS for recent/real-time.
-        # ERA5 typically available through ~18 months ago; ARCO mirrors it.
-        cutoff = datetime(2023, 6, 1, tzinfo=timezone.utc)
-        st = (
-            start_time
-            if start_time.tzinfo
-            else start_time.replace(tzinfo=timezone.utc)
-        )
-        source_name = "ARCO/ERA5" if st < cutoff else "GFS"
+        """Fetch forecast for the sparse Texas grid from Open-Meteo."""
         logger.info(
-            "SFNO inference: start=%s  steps=%d  source=%s",
+            "Fetching grid forecast from Open-Meteo: start=%s  steps=%d  points=%d",
             start_time.isoformat(),
             steps,
-            source_name,
+            len(GRID_POINTS),
         )
 
         try:
-            data_source = ARCO() if st < cutoff else GFS()
-        except Exception as exc:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Batch requests to avoid rate limiting (Open-Meteo allows ~10k/day)
+                results = []
+                batch_size = 5
+                for i in range(0, len(GRID_POINTS), batch_size):
+                    batch = GRID_POINTS[i : i + batch_size]
+                    batch_tasks = [
+                        _fetch_open_meteo(client, lat, lon, hours=steps * 6)
+                        for lat, lon in batch
+                    ]
+                    batch_results = await asyncio.gather(*batch_tasks)
+                    results.extend(batch_results)
+                    if i + batch_size < len(GRID_POINTS):
+                        await asyncio.sleep(0.3)
+        except httpx.HTTPStatusError as exc:
             raise DataFetchError(
-                f"Failed to initialise {source_name} data source: {exc}"
+                f"Open-Meteo API returned {exc.response.status_code}: {exc}"
             ) from exc
+        except (httpx.HTTPError, Exception) as exc:
+            raise DataFetchError(f"Open-Meteo API error: {exc}") from exc
 
-        time_str = start_time.strftime("%Y-%m-%dT%H:%M:%S")
+        # Build a lookup: (lat, lon) -> response
+        point_data: Dict[Tuple[float, float], Dict[str, Any]] = {}
+        for (lat, lon), resp in zip(GRID_POINTS, results):
+            point_data[(lat, lon)] = resp
 
-        try:
-            io = deterministic(
-                time=[time_str],
-                nsteps=steps,
-                prognostic=self.model,
-                data=data_source,
-                output=ZarrBackend(),
-            )
-        except torch.cuda.OutOfMemoryError as exc:
-            vram = torch.cuda.memory_allocated(0) / (1024**3)
-            raise GPUOutOfMemoryError(str(exc), vram_used_gb=vram) from exc
-        except (ConnectionError, TimeoutError, OSError) as exc:
-            raise DataFetchError(
-                f"Network error fetching initial conditions: {exc}"
-            ) from exc
+        # Assemble into timestep grids matching the old SFNO format.
+        # Each timestep has 2D arrays: [n_lats][n_lons]
+        # We pick every 6th hour from the hourly data.
+        n_lats = len(GRID_LATS)
+        n_lons = len(GRID_LONS)
 
-        # ── Extract arrays from ZarrBackend ─────────────────────────
-        try:
-            root = io.root
-        except AttributeError:
-            root = io  # fallback for older earth2studio versions
-
-        available_keys = list(root.keys())
-        lats = np.array(root["lat"])  # (721,)  90 → -90
-        lons = np.array(root["lon"])  # (1440,) 0 → 359.75
-
-        # Resolve variable names (canonical → whatever the output uses)
-        var_map: Dict[str, str] = {}
-        for target, aliases in _VAR_ALIASES.items():
-            for alias in aliases:
-                if alias in available_keys:
-                    var_map[target] = alias
-                    break
-            else:
-                logger.warning(
-                    "Variable %s not in output.  Available: %s",
-                    target,
-                    available_keys,
-                )
-
-        # Load arrays — drop batch dim → (n_steps+1, 721, 1440)
-        raw: Dict[str, np.ndarray] = {}
-        for key, zarr_name in var_map.items():
-            arr = np.array(root[zarr_name])
-            if arr.ndim == 4:
-                arr = arr[0]  # drop batch dim
-            raw[key] = arr
-
-        # ── Slice US region ─────────────────────────────────────────
-        lat_mask = (lats >= US_LAT_MIN) & (lats <= US_LAT_MAX)
-        lon_mask = (lons >= US_LON_MIN_360) & (lons <= US_LON_MAX_360)
-        lat_idx = np.where(lat_mask)[0]
-        lon_idx = np.where(lon_mask)[0]
-
-        us_lats = lats[lat_idx]
-        us_lons = lons[lon_idx]
-        # Convert 0-360 → -180..180 for frontend consumption.
-        us_lons_180 = np.where(us_lons > 180, us_lons - 360, us_lons)
-
-        n_total = next(iter(raw.values())).shape[0] if raw else steps + 1
+        # Determine how many 6-hour steps we have
+        sample_hourly = results[0].get("hourly", {})
+        total_hours = len(sample_hourly.get("time", []))
+        n_steps = min(steps + 1, total_hours // 6 + 1)
 
         timesteps: List[Dict[str, Any]] = []
-        for s in range(n_total):
+        for s in range(n_steps):
             hour = s * 6
+            hour_idx = hour  # index into hourly arrays
             ts = start_time + timedelta(hours=hour)
 
-            # Slice each variable to the US region.
-            us: Dict[str, np.ndarray] = {}
-            for key in raw:
-                us[key] = raw[key][s][np.ix_(lat_idx, lon_idx)]
+            # Build 2D grids
+            temp_grid: List[List[float]] = []
+            wind_grid: List[List[float]] = []
+            wdir_grid: List[List[float]] = []
+            pres_grid: List[List[float]] = []
 
-            t2m = us.get("t2m")
-            u = us.get("u10m")
-            v = us.get("v10m")
-            msl = us.get("msl")
+            for lat in GRID_LATS:
+                temp_row: List[float] = []
+                wind_row: List[float] = []
+                wdir_row: List[float] = []
+                pres_row: List[float] = []
+                for lon in GRID_LONS:
+                    hourly = point_data[(lat, lon)].get("hourly", {})
+                    temps = hourly.get("temperature_2m", [])
+                    winds = hourly.get("wind_speed_10m", [])
+                    wdirs = hourly.get("wind_direction_10m", [])
+                    press = hourly.get("surface_pressure", [])
 
-            # Convert units.
-            temp_f = (
-                np.round(_kelvin_to_f(t2m), 1) if t2m is not None else np.array([[]])
-            )
-            wind_speed = (
-                np.round(_ms_to_mph(np.sqrt(u**2 + v**2)), 1)
-                if u is not None and v is not None
-                else np.array([[]])
-            )
-            wind_dir = (
-                np.round(_wind_direction_deg(u, v), 1)
-                if u is not None and v is not None
-                else np.array([[]])
-            )
-            pressure = (
-                np.round(_pa_to_hpa(msl), 1) if msl is not None else np.array([[]])
-            )
+                    idx = min(hour_idx, len(temps) - 1) if temps else 0
+
+                    temp_row.append(round(temps[idx], 1) if idx < len(temps) else 0.0)
+                    wind_row.append(round(winds[idx], 1) if idx < len(winds) else 0.0)
+                    wdir_row.append(round(wdirs[idx], 1) if idx < len(wdirs) else 0.0)
+                    pres_row.append(round(press[idx], 1) if idx < len(press) else 0.0)
+
+                temp_grid.append(temp_row)
+                wind_grid.append(wind_row)
+                wdir_grid.append(wdir_row)
+                pres_grid.append(pres_row)
 
             timesteps.append(
                 {
                     "step": s,
                     "hour": hour,
                     "timestamp": ts.isoformat(),
-                    "temperature_f": temp_f.tolist(),
-                    "wind_mph": wind_speed.tolist(),
-                    "wind_dir_deg": wind_dir.tolist(),
-                    "pressure_hpa": pressure.tolist(),
+                    "temperature_f": temp_grid,
+                    "wind_mph": wind_grid,
+                    "wind_dir_deg": wdir_grid,
+                    "pressure_hpa": pres_grid,
                     "grid_bounds": {
-                        "lat_min": float(us_lats.min()),
-                        "lat_max": float(us_lats.max()),
-                        "lon_min": float(us_lons_180.min()),
-                        "lon_max": float(us_lons_180.max()),
+                        "lat_min": float(GRID_LATS[-1]),
+                        "lat_max": float(GRID_LATS[0]),
+                        "lon_min": float(GRID_LONS[0]),
+                        "lon_max": float(GRID_LONS[-1]),
                     },
                 }
             )
 
         result = {
-            "model": "earth2studio-sfno",
+            "model": "open-meteo",
             "start_time": start_time.isoformat(),
             "region": "us",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "us_lats": us_lats.tolist(),
-            "us_lons": us_lons_180.tolist(),
+            "us_lats": GRID_LATS,
+            "us_lons": GRID_LONS,
             "steps": timesteps,
         }
 
         logger.info(
-            "Inference complete: %d timesteps, grid %dx%d",
+            "Grid forecast complete: %d timesteps, grid %dx%d",
             len(timesteps),
-            len(us_lats),
-            len(us_lons),
+            n_lats,
+            n_lons,
         )
         return result
 
-    # ── City extraction ─────────────────────────────────────────────
+    # ── City forecasts (Open-Meteo) ─────────────────────────────────
 
-    def _extract_cities(self, forecast: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract city-level point forecasts from a full grid forecast."""
-        us_lats = np.array(forecast["us_lats"])
-        us_lons = np.array(forecast["us_lons"])
+    async def _fetch_city_forecasts(
+        self, start_time: datetime
+    ) -> Dict[str, Any]:
+        """Fetch per-city hourly forecasts directly from Open-Meteo."""
+        logger.info(
+            "Fetching city forecasts from Open-Meteo for %d cities",
+            len(CITIES),
+        )
+
+        city_names = list(CITIES.keys())
+        coords = list(CITIES.values())
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                tasks = [
+                    _fetch_open_meteo(client, lat, lon, hours=48)
+                    for lat, lon in coords
+                ]
+                results = await asyncio.gather(*tasks)
+        except (httpx.HTTPError, Exception) as exc:
+            raise DataFetchError(f"Open-Meteo API error: {exc}") from exc
 
         cities_out: Dict[str, Any] = {}
-        for city_name, (lat, lon) in CITIES.items():
-            lat_idx = int(np.argmin(np.abs(us_lats - lat)))
-            lon_idx = int(np.argmin(np.abs(us_lons - lon)))
+        for name, (lat, lon), resp in zip(city_names, coords, results):
+            hourly_data = resp.get("hourly", {})
+            times = hourly_data.get("time", [])
+            temps = hourly_data.get("temperature_2m", [])
+            winds = hourly_data.get("wind_speed_10m", [])
+            wdirs = hourly_data.get("wind_direction_10m", [])
+            press = hourly_data.get("surface_pressure", [])
 
+            # Build hourly list — every 6 hours to match original format
             hourly: List[Dict[str, Any]] = []
-            for step in forecast["steps"]:
-                temp_grid = step["temperature_f"]
-                wind_grid = step["wind_mph"]
-                wdir_grid = step["wind_dir_deg"]
-                pres_grid = step["pressure_hpa"]
-
-                # Guard against empty grids from missing variables.
-                def _pick(grid: Any, li: int, lo: int) -> float:
-                    try:
-                        return float(grid[li][lo])
-                    except (IndexError, TypeError):
-                        return 0.0
-
+            for i in range(0, len(times), 6):
+                hour = i
+                ts = start_time + timedelta(hours=hour)
                 hourly.append(
                     {
-                        "hour": step["hour"],
-                        "timestamp": step["timestamp"],
-                        "temp_f": _pick(temp_grid, lat_idx, lon_idx),
-                        "wind_mph": _pick(wind_grid, lat_idx, lon_idx),
-                        "wind_dir_deg": _pick(wdir_grid, lat_idx, lon_idx),
-                        "pressure_hpa": _pick(pres_grid, lat_idx, lon_idx),
+                        "hour": hour,
+                        "timestamp": ts.isoformat(),
+                        "temp_f": round(temps[i], 1) if i < len(temps) else 0.0,
+                        "wind_mph": round(winds[i], 1) if i < len(winds) else 0.0,
+                        "wind_dir_deg": round(wdirs[i], 1) if i < len(wdirs) else 0.0,
+                        "pressure_hpa": round(press[i], 1) if i < len(press) else 0.0,
                     }
                 )
 
-            cities_out[city_name] = {
+            cities_out[name] = {
                 "lat": lat,
                 "lon": lon,
                 "hourly": hourly,
             }
 
-        return {
-            "model": forecast["model"],
-            "start_time": forecast["start_time"],
-            "generated_at": forecast["generated_at"],
+        result = {
+            "model": "open-meteo",
+            "start_time": start_time.isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "cities": cities_out,
         }
+
+        logger.info("City forecasts complete for %d cities", len(cities_out))
+        return result
 
     # ── Caching ─────────────────────────────────────────────────────
 

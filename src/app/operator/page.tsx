@@ -6,6 +6,24 @@ import Link from "next/link";
 import OperatorGlobe from "@/components/OperatorGlobe";
 import OperatorRightSidebar from "@/components/OperatorRightSidebar";
 import CascadeOverlay from "@/components/CascadeOverlay";
+import OperatorEntryModal, { getRegionFromZip } from "@/components/OperatorEntryModal";
+import EiaDataPanel from "@/components/EiaDataPanel";
+import {
+  fetchOverview,
+  fetchHotspots,
+  fetchArcs,
+  fetchCascadeProbability,
+  fetchCrews,
+  fetchEvents,
+  type OverviewData,
+  type Hotspot,
+  type Arc,
+  type CascadeProbability,
+  type Crew,
+  type TimelineEvent,
+} from "@/lib/api";
+import type { HotspotData, ArcData } from "@/components/OperatorGlobe";
+import type { CrewData, EventData } from "@/components/OperatorRightSidebar";
 
 /* ================================================================== */
 /*  TYPES                                                              */
@@ -14,16 +32,6 @@ interface FocusedLocation {
   lat: number;
   lng: number;
   altitude: number;
-}
-
-interface ThreatData {
-  id: string;
-  icon: string;
-  name: string;
-  severity: number;
-  region: string;
-  lat: number;
-  lng: number;
 }
 
 type GridStatus = "NOMINAL" | "STRESSED" | "CRITICAL" | "CASCADE";
@@ -40,53 +48,8 @@ interface TickerItem {
 }
 
 /* ================================================================== */
-/*  MOCK DATA                                                          */
+/*  CONSTANTS                                                          */
 /* ================================================================== */
-const THREATS: ThreatData[] = [
-  {
-    id: "t1",
-    icon: "🔴",
-    name: "Ice Storm — Austin Metro",
-    severity: 3,
-    region: "ERCOT",
-    lat: 30.27,
-    lng: -97.74,
-  },
-  {
-    id: "t2",
-    icon: "🔴",
-    name: "Extreme Heat — TX South",
-    severity: 4,
-    region: "ERCOT",
-    lat: 27.8,
-    lng: -97.4,
-  },
-  {
-    id: "t3",
-    icon: "🟡",
-    name: "Cold Snap — Northeast",
-    severity: 2,
-    region: "PJM-NYISO",
-    lat: 40.71,
-    lng: -74.01,
-  },
-];
-
-const REGION_SEGMENTS: RegionSegment[] = [
-  { name: "ERCOT", status: "critical", width: "30%" },
-  { name: "WECC", status: "nominal", width: "25%" },
-  { name: "PJM", status: "stressed", width: "25%" },
-  { name: "NYISO", status: "nominal", width: "20%" },
-];
-
-const TICKER_ITEMS: TickerItem[] = [
-  { text: "2,400,000 outage-hours prevented", color: "text-[#22c55e]" },
-  { text: "47 crews pre-positioned", color: "text-[#22c55e]" },
-  { text: "73% cascade probability — ERCOT", color: "text-[#ef4444]" },
-  { text: "Grid frequency: 60.02 Hz", color: "text-[#22c55e]" },
-  { text: "Next risk window: 36h 14m", color: "text-[#f59e0b]" },
-];
-
 const SEGMENT_COLORS: Record<RegionSegment["status"], string> = {
   nominal: "bg-[#22c55e]",
   stressed: "bg-[#f59e0b]",
@@ -101,10 +64,158 @@ const STATUS_STYLE: Record<GridStatus, { color: string; pulse?: boolean }> = {
 };
 
 const SEVERITY_BADGE: Record<number, { text: string; bg: string; border: string }> = {
+  1: { text: "text-[#22c55e]", bg: "bg-[#22c55e]/10", border: "border-[#22c55e]/25" },
   2: { text: "text-[#f59e0b]", bg: "bg-[#f59e0b]/10", border: "border-[#f59e0b]/25" },
   3: { text: "text-[#f97316]", bg: "bg-[#f97316]/10", border: "border-[#f97316]/25" },
   4: { text: "text-[#ef4444]", bg: "bg-[#ef4444]/10", border: "border-[#ef4444]/25" },
 };
+
+/* ================================================================== */
+/*  MAPPERS — backend → frontend                                       */
+/* ================================================================== */
+function mapStatus(s: string): "nominal" | "stressed" | "critical" {
+  if (s === "stressed") return "stressed";
+  if (s === "critical" || s === "blackout") return "critical";
+  return "nominal";
+}
+
+function mapGridStatus(s: string): GridStatus {
+  const m = s.toLowerCase();
+  if (m === "critical" || m === "blackout" || m === "cascade") return "CRITICAL";
+  if (m === "stressed") return "STRESSED";
+  return "NOMINAL";
+}
+
+function mapHotspots(raw: Hotspot[]): HotspotData[] {
+  return raw.map((h) => {
+    const util = h.capacity_mw > 0 ? h.load_mw / h.capacity_mw : 0;
+    const status: HotspotData["status"] =
+      util > 0.8 ? "critical" : util > 0.5 ? "stressed" : "nominal";
+    return {
+      id: h.id,
+      city: h.name + ", TX",
+      lat: h.lat,
+      lng: h.lon,
+      severity: status === "critical" ? 4 : status === "stressed" ? 3 : 1,
+      status,
+      threat: h.outage_risk_pct > 50 ? "High Load" : h.outage_risk_pct > 30 ? "Elevated Load" : "Normal",
+      cascade: Math.round(h.outage_risk_pct),
+    };
+  });
+}
+
+function mapArcs(raw: Arc[]): ArcData[] {
+  return raw.map((a) => ({
+    startLat: a.source_coords[0],
+    startLng: a.source_coords[1],
+    endLat: a.target_coords[0],
+    endLng: a.target_coords[1],
+    status: mapStatus(a.status),
+  }));
+}
+
+function mapCrews(raw: Crew[]): CrewData[] {
+  return raw.map((c) => ({
+    id: c.crew_id,
+    status: c.status,
+    location: `${c.city} · ${c.specialty.replace(/_/g, " ")}`,
+    lat: c.lat,
+    lng: c.lon,
+    personnel: 6,
+    eta: c.eta_minutes > 0 ? `${Math.floor(c.eta_minutes / 60)}h ${c.eta_minutes % 60}m` : undefined,
+  }));
+}
+
+const SEVERITY_ICONS: Record<string, string> = {
+  critical: "🔴",
+  emergency: "🔴",
+  warning: "⚠️",
+  info: "⚡",
+  success: "✅",
+};
+
+function mapEvents(raw: TimelineEvent[]): EventData[] {
+  return raw.map((e) => {
+    const totalMin = e.timestamp_offset_minutes;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    const ts = `T+${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    const sev = e.severity === "emergency" ? "critical" : (e.severity as EventData["severity"]);
+    return {
+      id: e.event_id,
+      icon: SEVERITY_ICONS[e.severity] || "⚡",
+      timestamp: ts,
+      title: e.title,
+      description: e.description,
+      severity: sev || "info",
+    };
+  });
+}
+
+function buildSegments(overview: OverviewData): RegionSegment[] {
+  const regions = overview.regions;
+  const total = regions.reduce((s, r) => s + r.load_mw, 0);
+  return regions
+    .sort((a, b) => b.load_mw - a.load_mw)
+    .slice(0, 6)
+    .map((r) => ({
+      name: r.name,
+      status: mapStatus(r.status),
+      width: `${Math.max((r.load_mw / total) * 100, 5)}%`,
+    }));
+}
+
+function buildThreats(overview: OverviewData) {
+  return overview.regions
+    .filter((r) => r.weather.is_extreme || r.status !== "normal")
+    .map((r, i) => ({
+      id: `t-${r.region_id}`,
+      icon: r.status === "critical" || r.status === "blackout" ? "🔴" : r.weather.is_extreme ? "🟡" : "🟢",
+      name: `${r.weather.condition} — ${r.name}`,
+      severity: r.status === "critical" || r.status === "blackout" ? 4 : r.weather.is_extreme ? 3 : 2,
+      region: "ERCOT",
+      lat: 30.27 + (i - 3) * 0.8,
+      lng: -97.74 + (i - 3) * 1.2,
+    }));
+}
+
+function buildTicker(
+  overview: OverviewData,
+  cascadeData: CascadeProbability | null,
+  crewCount: number
+): TickerItem[] {
+  const items: TickerItem[] = [];
+  const totalLoad = Math.round(overview.total_load_mw).toLocaleString();
+  const totalCap = Math.round(overview.total_capacity_mw).toLocaleString();
+  items.push({
+    text: `System Load: ${totalLoad} MW / ${totalCap} MW capacity`,
+    color: "text-[#a1a1aa]",
+  });
+  items.push({
+    text: `Grid Frequency: ${overview.grid_frequency_hz.toFixed(2)} Hz`,
+    color: overview.grid_frequency_hz >= 59.95 ? "text-[#22c55e]" : "text-[#ef4444]",
+  });
+  if (cascadeData) {
+    const ercotProb = Math.round((cascadeData.probabilities["ERCOT"] ?? 0) * 100);
+    items.push({
+      text: `${ercotProb}% cascade probability — ERCOT`,
+      color: ercotProb > 50 ? "text-[#ef4444]" : ercotProb > 25 ? "text-[#f59e0b]" : "text-[#22c55e]",
+    });
+  }
+  items.push({
+    text: `${crewCount} crews deployed across ERCOT`,
+    color: "text-[#22c55e]",
+  });
+  for (const r of overview.regions) {
+    if (r.weather.is_extreme) {
+      items.push({
+        text: `${r.name}: ${r.weather.temp_f}°F — ${r.weather.condition}`,
+        color: "text-[#f59e0b]",
+      });
+    }
+  }
+  return items;
+}
 
 /* ================================================================== */
 /*  HOOKS                                                              */
@@ -130,8 +241,6 @@ function useCurrentTime() {
 /* ================================================================== */
 /*  SMALL COMPONENTS                                                   */
 /* ================================================================== */
-
-/* frequency indicator dot */
 function FreqDot({ hz }: { hz: number }) {
   const color =
     hz >= 59.95 && hz <= 60.05
@@ -147,59 +256,26 @@ function FreqDot({ hz }: { hz: number }) {
   );
 }
 
-/* progress bar */
-function ProgressBar({
-  value,
-  max,
-  color,
-}: {
-  value: number;
-  max: number;
-  color: string;
-}) {
-  const pct = Math.min((value / max) * 100, 100);
-  return (
-    <div className="h-2 rounded-full bg-[#1a1a1a] overflow-hidden w-full">
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${pct}%` }}
-        transition={{ duration: 1, ease: "easeOut" }}
-        className={`h-full rounded-full ${color}`}
-      />
-    </div>
-  );
-}
-
-/* animated number */
-function AnimCount({
-  value,
-  className = "",
-}: {
-  value: number;
-  className?: string;
-}) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    let frame: number;
-    const dur = 1000;
-    const start = performance.now();
-    function tick(now: number) {
-      const p = Math.min((now - start) / dur, 1);
-      const e = 1 - Math.pow(1 - p, 3);
-      setCount(Math.round(e * value));
-      if (p < 1) frame = requestAnimationFrame(tick);
-    }
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [value]);
-  return <span className={className}>{count.toLocaleString()}</span>;
-}
-
 /* ================================================================== */
 /*  LEFT SIDEBAR CARDS                                                 */
 /* ================================================================== */
+interface ThreatData {
+  id: string;
+  icon: string;
+  name: string;
+  severity: number;
+  region: string;
+  lat: number;
+  lng: number;
+}
 
-function GridStatusCard({ status }: { status: GridStatus }) {
+function GridStatusCard({
+  status,
+  segments,
+}: {
+  status: GridStatus;
+  segments: RegionSegment[];
+}) {
   const style = STATUS_STYLE[status];
   return (
     <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-6 space-y-3">
@@ -213,10 +289,8 @@ function GridStatusCard({ status }: { status: GridStatus }) {
       >
         {status}
       </span>
-
-      {/* segmented bar */}
       <div className="flex h-3 rounded-full overflow-hidden gap-px mt-4">
-        {REGION_SEGMENTS.map((seg) => (
+        {segments.map((seg) => (
           <div
             key={seg.name}
             className={`${SEGMENT_COLORS[seg.status]}`}
@@ -225,8 +299,8 @@ function GridStatusCard({ status }: { status: GridStatus }) {
         ))}
       </div>
       <div className="flex text-[10px] font-mono text-[#52525b]">
-        {REGION_SEGMENTS.map((seg) => (
-          <span key={seg.name} style={{ width: seg.width }}>
+        {segments.map((seg) => (
+          <span key={seg.name} style={{ width: seg.width }} className="truncate">
             {seg.name}
           </span>
         ))}
@@ -255,7 +329,6 @@ function ThreatsCard({
           {threats.length}
         </span>
       </div>
-
       <div className="space-y-2 pt-1">
         {threats.map((t) => {
           const sev = SEVERITY_BADGE[t.severity] || SEVERITY_BADGE[2];
@@ -285,40 +358,49 @@ function ThreatsCard({
   );
 }
 
-function CascadeProbabilityCard() {
+function CascadeProbabilityCard({
+  probability,
+  totalLoad,
+  totalCapacity,
+}: {
+  probability: number;
+  totalLoad: number;
+  totalCapacity: number;
+}) {
+  const pct = Math.round(probability * 100);
+  const color = pct > 50 ? "text-[#ef4444]" : pct > 25 ? "text-[#f59e0b]" : "text-[#22c55e]";
+  const barColor = pct > 50 ? "bg-[#ef4444]" : pct > 25 ? "bg-[#f59e0b]" : "bg-[#22c55e]";
+
   return (
     <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-6 space-y-3">
       <span className="text-xs uppercase tracking-widest text-[#52525b] font-semibold block mb-3">
         Cascade Probability
       </span>
-      <span className="block text-7xl font-mono font-bold text-[#ef4444] leading-none">
-        73%
+      <span className={`block text-7xl font-mono font-bold ${color} leading-none`}>
+        {pct}%
       </span>
       <span className="text-sm text-[#52525b] block">ERCOT region</span>
-
-      {/* Thicker progress bar */}
       <div className="h-3 rounded-full bg-[#1a1a1a] overflow-hidden w-full mt-2">
         <motion.div
           initial={{ width: 0 }}
-          animate={{ width: "73%" }}
+          animate={{ width: `${pct}%` }}
           transition={{ duration: 1, ease: "easeOut" }}
-          className="h-full rounded-full bg-[#ef4444]"
+          className={`h-full rounded-full ${barColor}`}
         />
       </div>
-
-      {/* Population stat (merged from removed PopulationCard) */}
       <div className="pt-3 mt-2 border-t border-[#1a1a1a]">
         <div className="flex items-baseline justify-between">
-          <span className="text-sm text-[#52525b]">Households exposed</span>
-          <span className="text-2xl font-mono font-bold text-[#f59e0b]">2.4M</span>
+          <span className="text-sm text-[#52525b]">System Load</span>
+          <span className="text-2xl font-mono font-bold text-[#f59e0b]">
+            {(totalLoad / 1000).toFixed(1)} GW
+          </span>
         </div>
         <span className="text-xs text-[#3f3f46] block mt-1">
-          TX: 1.8M · NE: 0.4M · CA: 0.2M
+          of {(totalCapacity / 1000).toFixed(1)} GW capacity
         </span>
       </div>
-
       <span className="text-xs text-[#3f3f46] block">
-        Based on 2,000-bus simulation
+        Based on 2,000-bus ACTIVSg2000 simulation
       </span>
     </div>
   );
@@ -328,7 +410,6 @@ function CascadeProbabilityCard() {
 /*  BOTTOM TICKER                                                      */
 /* ================================================================== */
 function BottomTicker({ items }: { items: TickerItem[] }) {
-  /* duplicate for seamless loop */
   const duped = [...items, ...items, ...items];
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 h-12 bg-[#111111] border-t border-[#1a1a1a] overflow-hidden flex items-center">
@@ -348,25 +429,115 @@ function BottomTicker({ items }: { items: TickerItem[] }) {
 }
 
 /* ================================================================== */
+/*  LOADING SKELETON                                                   */
+/* ================================================================== */
+function LoadingSkeleton() {
+  return (
+    <div className="h-screen w-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="text-center space-y-4">
+        <div className="w-4 h-4 rounded-full bg-[#22c55e] mx-auto animate-pulse shadow-[0_0_20px_rgba(34,197,94,0.4)]" />
+        <p className="text-sm font-mono text-[#52525b]">Loading grid data...</p>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  PAGE                                                               */
 /* ================================================================== */
-export default function OperatorPage({
-  children,
-}: {
-  children?: ReactNode;
-}) {
+export default function OperatorPage({ children }: { children?: ReactNode }) {
   const time = useCurrentTime();
-  const gridHz = 60.02;
-  const gridStatus: GridStatus = "STRESSED";
 
+  /* ---- Entry modal state ---- */
+  const [showEntry, setShowEntry] = useState(true);
+  const [scenario, setScenario] = useState("uri");
+  const [zipcode, setZipcode] = useState("78701");
+
+  /* ---- Data state ---- */
+  const [loading, setLoading] = useState(false);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [hotspots, setHotspots] = useState<HotspotData[]>([]);
+  const [arcs, setArcs] = useState<ArcData[]>([]);
+  const [cascadeData, setCascadeData] = useState<CascadeProbability | null>(null);
+  const [crews, setCrews] = useState<CrewData[]>([]);
+  const [events, setEvents] = useState<EventData[]>([]);
+  const [crewCoverage, setCrewCoverage] = useState(0);
+
+  /* ---- UI state ---- */
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
   const [focusedThreatId, setFocusedThreatId] = useState<string | null>(null);
   const [isCascadeOpen, setIsCascadeOpen] = useState(false);
+  const [isEiaOpen, setIsEiaOpen] = useState(false);
+
+  /* ---- Fetch all data ---- */
+  const loadData = useCallback(async (sc: string) => {
+    setLoading(true);
+    try {
+      const [ov, hs, ar, cp, cr, ev] = await Promise.all([
+        fetchOverview(sc),
+        fetchHotspots(sc),
+        fetchArcs(sc),
+        fetchCascadeProbability(sc),
+        fetchCrews(sc),
+        fetchEvents(sc),
+      ]);
+      setOverview(ov);
+      setHotspots(mapHotspots(hs));
+      setArcs(mapArcs(ar));
+      setCascadeData(cp);
+      setCrews(mapCrews(cr.crews));
+      setCrewCoverage(cr.coverage_pct);
+      setEvents(mapEvents(ev));
+    } catch (err) {
+      console.error("Failed to load operator data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /* ---- Entry modal submit ---- */
+  const handleEntrySubmit = useCallback(
+    (zip: string, sc: string) => {
+      setZipcode(zip);
+      setScenario(sc);
+      setShowEntry(false);
+      loadData(sc);
+
+      // Center map on the user's region
+      const region = getRegionFromZip(zip);
+      setFocusedLocation({ lat: region.lat, lng: region.lng, altitude: 2.0 });
+      setTimeout(() => setFocusedLocation(null), 2000);
+    },
+    [loadData]
+  );
+
+  /* ---- Derived data ---- */
+  const gridHz = overview?.grid_frequency_hz ?? 60.0;
+  const gridStatus: GridStatus = overview ? mapGridStatus(overview.national_status) : "NOMINAL";
+  const segments: RegionSegment[] = overview ? buildSegments(overview) : [];
+  const threats: ThreatData[] = overview ? buildThreats(overview) : [];
+  const ercotProb = cascadeData?.probabilities["ERCOT"] ?? 0;
+  const tickerItems: TickerItem[] =
+    overview ? buildTicker(overview, cascadeData, crews.length) : [];
 
   const handleFocusThreat = useCallback((t: ThreatData) => {
     setFocusedThreatId(t.id);
     setFocusedLocation({ lat: t.lat, lng: t.lng, altitude: 1.8 });
   }, []);
+
+  /* ---- Entry modal ---- */
+  if (showEntry) {
+    return <OperatorEntryModal isOpen={true} onSubmit={handleEntrySubmit} />;
+  }
+
+  if (loading || !overview) {
+    return <LoadingSkeleton />;
+  }
+
+  const scenarioLabel =
+    scenario === "uri"
+      ? "Winter Storm Uri — Feb 13, 2021 T-48h"
+      : "Normal Operations — Feb 1, 2021";
 
   return (
     <div className="h-screen w-screen bg-[#0a0a0a] flex flex-col overflow-hidden">
@@ -374,7 +545,6 @@ export default function OperatorPage({
       {/*  COMMAND BAR                                                  */}
       {/* ============================================================ */}
       <header className="h-16 flex-shrink-0 bg-[#111111] border-b border-[#1a1a1a] flex items-center px-5 gap-4 z-50">
-        {/* Left */}
         <Link
           href="/"
           className="inline-flex items-center justify-center h-11 px-4 rounded-lg border border-[#3f3f46] text-sm text-[#a1a1aa] hover:text-white hover:border-[#22c55e]/50 transition-colors flex-shrink-0"
@@ -395,10 +565,9 @@ export default function OperatorPage({
           Operator View
         </span>
 
-        {/* Center */}
         <div className="flex-1 flex items-center justify-center gap-3 min-w-0">
           <span className="text-sm text-[#a1a1aa] truncate hidden lg:block">
-            SCENARIO: Winter Storm Uri — Feb 13, 2021 T-48h
+            SCENARIO: {scenarioLabel}
           </span>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <span
@@ -409,7 +578,6 @@ export default function OperatorPage({
           </div>
         </div>
 
-        {/* Right */}
         <span className="text-sm font-mono text-[#a1a1aa] hidden md:block flex-shrink-0">
           {time}
         </span>
@@ -420,13 +588,23 @@ export default function OperatorPage({
         </div>
 
         <button
+          onClick={() => setIsEiaOpen(true)}
+          className="h-11 px-4 rounded-lg border border-[#3f3f46] text-sm text-[#a1a1aa] font-semibold hover:text-white hover:border-[#22c55e]/50 transition-colors cursor-pointer flex-shrink-0"
+        >
+          EIA Data
+        </button>
+
+        <button
           onClick={() => setIsCascadeOpen(true)}
           className="h-11 px-4 rounded-lg bg-[#22c55e] text-white text-sm font-semibold hover:bg-[#16a34a] transition-colors cursor-pointer flex-shrink-0"
         >
           Run Simulation
         </button>
 
-        <button className="w-11 h-11 rounded-lg border border-[#3f3f46] flex items-center justify-center text-[#a1a1aa] hover:text-white hover:border-[#52525b] transition-colors cursor-pointer flex-shrink-0">
+        <button
+          onClick={() => setShowEntry(true)}
+          className="w-11 h-11 rounded-lg border border-[#3f3f46] flex items-center justify-center text-[#a1a1aa] hover:text-white hover:border-[#52525b] transition-colors cursor-pointer flex-shrink-0"
+        >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -443,18 +621,24 @@ export default function OperatorPage({
           className="w-[352px] flex-shrink-0 border-r border-[#1a1a1a] overflow-y-auto p-5 space-y-5 hidden lg:block"
           style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.06) transparent" }}
         >
-          <GridStatusCard status={gridStatus} />
+          <GridStatusCard status={gridStatus} segments={segments} />
           <ThreatsCard
-            threats={THREATS}
+            threats={threats}
             onFocus={handleFocusThreat}
             focusedId={focusedThreatId}
           />
-          <CascadeProbabilityCard />
+          <CascadeProbabilityCard
+            probability={ercotProb}
+            totalLoad={overview.total_load_mw}
+            totalCapacity={overview.total_capacity_mw}
+          />
         </aside>
 
         {/* ---- CENTER GLOBE ---- */}
         <main className="flex-1 relative min-w-0 bg-[#0a0a0a]">
           <OperatorGlobe
+            hotspots={hotspots}
+            arcs={arcs}
             focusedLocation={focusedLocation}
             onSelectCity={(city) => setFocusedThreatId(city.id)}
             onDeselectCity={() => {
@@ -466,6 +650,9 @@ export default function OperatorPage({
 
         {/* ---- RIGHT SIDEBAR ---- */}
         <OperatorRightSidebar
+          crews={crews}
+          events={events}
+          crewCoverage={crewCoverage}
           onFocusLocation={(loc) =>
             setFocusedLocation({
               lat: loc.lat,
@@ -479,12 +666,18 @@ export default function OperatorPage({
       {/* ============================================================ */}
       {/*  BOTTOM TICKER                                                */}
       {/* ============================================================ */}
-      <BottomTicker items={TICKER_ITEMS} />
+      <BottomTicker items={tickerItems} />
 
       {/* Cascade Simulation Overlay */}
       <CascadeOverlay
         isOpen={isCascadeOpen}
         onClose={() => setIsCascadeOpen(false)}
+      />
+
+      {/* EIA Data Panel */}
+      <EiaDataPanel
+        isOpen={isEiaOpen}
+        onClose={() => setIsEiaOpen(false)}
       />
     </div>
   );

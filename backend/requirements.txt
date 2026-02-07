@@ -4,10 +4,10 @@ pydantic>=2.10.0,<3.0.0
 pydantic-settings>=2.7.0,<3.0.0
 python-dotenv>=1.0.0,<2.0.0
 
-# SFNO weather model (NVIDIA Earth2Studio)
-# Install with: pip install earth2studio[sfno]
-# May also need: pip install torch-harmonics makani
-earth2studio[sfno]>=0.3.0
+# SFNO weather model (NVIDIA Earth2Studio) — replaced by Open-Meteo API
+# earth2studio[sfno]>=0.3.0
+
+httpx>=0.27.0
 numpy>=1.24.0
 networkx>=3.0
 xgboost>=2.0.0
