@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import consumer, forecast, grid, orchestrate, simulate, utility, weather
+from app.routers import consumer, forecast, grid, notifications, orchestrate, simulate, utility, weather
 from app.schemas.responses import ErrorResponse
 from app.services.ercot_data_service import ercot_data
 from app.services.grid_graph_service import grid_graph
@@ -52,6 +52,7 @@ app.include_router(simulate.router)
 app.include_router(consumer.router)
 app.include_router(utility.router)
 app.include_router(orchestrate.router)
+app.include_router(notifications.router)
 
 
 @app.exception_handler(ValueError)

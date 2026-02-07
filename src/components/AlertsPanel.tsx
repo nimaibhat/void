@@ -18,11 +18,17 @@ export interface AlertData {
     label: string;
     variant: "primary" | "secondary";
   };
+  actions?: Array<{
+    label: string;
+    variant: "primary" | "secondary" | "danger";
+    actionType: "accept" | "decline";
+  }>;
 }
 
 interface AlertsPanelProps {
   alerts?: AlertData[];
-  onAction?: (alertId: string) => void;
+  onAction?: (alertId: string, actionType?: "accept" | "decline") => void;
+  onClearAll?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -92,7 +98,7 @@ function AlertCard({
 }: {
   alert: AlertData;
   index: number;
-  onAction?: (alertId: string) => void;
+  onAction?: (alertId: string, actionType?: "accept" | "decline") => void;
 }) {
   const config = SEVERITY_CONFIG[alert.severity];
 
@@ -122,8 +128,26 @@ function AlertCard({
         {alert.description}
       </p>
 
-      {/* Action or resolved indicator */}
-      {alert.action ? (
+      {/* Action buttons */}
+      {alert.actions && alert.actions.length > 0 ? (
+        <div className="flex justify-end gap-2">
+          {alert.actions.map((action) => (
+            <button
+              key={action.actionType}
+              onClick={() => onAction?.(alert.id, action.actionType)}
+              className={
+                action.variant === "primary"
+                  ? "h-10 px-4 rounded-lg bg-[#22c55e] text-white text-sm font-medium hover:bg-[#16a34a] transition-colors cursor-pointer"
+                  : action.variant === "danger"
+                  ? "h-10 px-4 rounded-lg border border-[#ef4444]/30 text-[#ef4444] text-sm font-medium hover:bg-[#ef4444]/10 transition-colors cursor-pointer"
+                  : "h-10 px-4 rounded-lg border border-[#3f3f46] text-[#d4d4d8] text-sm font-medium hover:bg-[#1a1a1a] hover:border-[#52525b] transition-colors cursor-pointer"
+              }
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : alert.action ? (
         <div className="flex justify-end">
           {alert.action.variant === "primary" ? (
             <button
@@ -153,7 +177,7 @@ function AlertCard({
 /* ------------------------------------------------------------------ */
 /*  AlertsPanel                                                        */
 /* ------------------------------------------------------------------ */
-export default function AlertsPanel({ alerts = [], onAction }: AlertsPanelProps) {
+export default function AlertsPanel({ alerts = [], onAction, onClearAll }: AlertsPanelProps) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const filtered = filterAlerts(alerts, activeFilter);
 
@@ -161,7 +185,17 @@ export default function AlertsPanel({ alerts = [], onAction }: AlertsPanelProps)
     <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 flex flex-col h-full">
       {/* Header + filters */}
       <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-        <h3 className="text-lg font-semibold text-white">Alerts</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-white">Alerts</h3>
+          {onClearAll && filtered.length > 0 && (
+            <button
+              onClick={onClearAll}
+              className="text-xs font-medium text-[#71717a] hover:text-[#ef4444] transition-colors cursor-pointer"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {FILTERS.map((f) => (
             <button

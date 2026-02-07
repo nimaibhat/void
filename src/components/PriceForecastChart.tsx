@@ -55,6 +55,27 @@ export default function PriceForecastChart({
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
+  // Hover handler - MUST be defined before any conditional returns
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const svg = svgRef.current;
+      if (!svg || !prices.length) return;
+      const rect = svg.getBoundingClientRect();
+      const svgX = ((e.clientX - rect.left) / rect.width) * W;
+      const idx = Math.round(((svgX - PAD_L) / CHART_W) * (prices.length - 1));
+      if (idx >= 0 && idx < prices.length) {
+        setHoverIdx(idx);
+      } else {
+        setHoverIdx(null);
+      }
+    },
+    [prices]
+  );
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverIdx(null);
+  }, []);
+
   /* ---- Loading / empty states ---- */
   if (loading) {
     return (
@@ -186,23 +207,6 @@ export default function PriceForecastChart({
   const avgUtil = prices.reduce((s, p) => s + p.grid_utilization_pct, 0) / prices.length;
   const avgWind = prices.reduce((s, p) => s + p.wind_gen_factor, 0) / prices.length;
 
-  // Hover handler
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
-      const svg = svgRef.current;
-      if (!svg) return;
-      const rect = svg.getBoundingClientRect();
-      const svgX = ((e.clientX - rect.left) / rect.width) * W;
-      const idx = Math.round(((svgX - PAD_L) / CHART_W) * (prices.length - 1));
-      if (idx >= 0 && idx < prices.length) {
-        setHoverIdx(idx);
-      } else {
-        setHoverIdx(null);
-      }
-    },
-    [prices.length]
-  );
-
   const hoverPrice = hoverIdx !== null ? prices[hoverIdx] : null;
 
   return (
@@ -245,7 +249,7 @@ export default function PriceForecastChart({
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverIdx(null)}
+        onMouseLeave={handleMouseLeave}
       >
         <defs>
           <linearGradient id="priceFillGrad" x1="0" y1="0" x2="0" y2="1">

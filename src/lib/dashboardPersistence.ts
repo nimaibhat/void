@@ -32,24 +32,28 @@ export interface PayoutRecord {
 export async function getProfileXRPLData(profileId: string): Promise<XRPLWalletData | null> {
   const { data, error } = await supabase
     .from("consumer_profiles")
-    .select("xrpl_address, xrpl_seed, xrpl_trustline_created, savings_usd_pending, savings_usd_paid")
+    .select("xrpl_address, xrpl_seed, xrpl_trustline_created, savings_pending_usd, savings_paid_usd, xrpl_wallet_address")
     .eq("id", profileId)
     .single();
 
   if (error || !data) {
+    console.error("[dashboardPersistence] Error fetching profile:", error);
     return null;
   }
 
-  if (!data.xrpl_address) {
+  // Use xrpl_wallet_address if xrpl_address is not set
+  const address = data.xrpl_address || data.xrpl_wallet_address;
+
+  if (!address) {
     return null;
   }
 
   return {
-    address: data.xrpl_address,
-    seed: data.xrpl_seed,
+    address,
+    seed: data.xrpl_seed || "",
     trustLineCreated: data.xrpl_trustline_created || false,
-    savingsUsdPending: Number(data.savings_usd_pending) || 0,
-    savingsUsdPaid: Number(data.savings_usd_paid) || 0,
+    savingsUsdPending: Number(data.savings_pending_usd) || 0,
+    savingsUsdPaid: Number(data.savings_paid_usd) || 0,
   };
 }
 

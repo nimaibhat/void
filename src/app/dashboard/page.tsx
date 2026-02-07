@@ -166,18 +166,28 @@ function mapLiveAlert(la: LiveAlert): AlertData {
     0,
     Math.round((Date.now() - new Date(la.created_at).getTime()) / 60000)
   );
+
+  // Show Accept + Decline buttons for weather alerts that are pending
+  const isWeatherAlert = la.alert_type?.startsWith("weather_");
+  const isPending = !la.status || la.status === "pending";
+
   return {
     id: la.id,
     severity,
     title: la.title,
     description: la.description,
-    timestamp: ago === 0 ? "just now" : `${ago}m ago`,
+    timestamp: ago === 0 ? "now" : `${ago}m ago`,
+    actions:
+      isWeatherAlert && isPending
+        ? [
+            { label: "Accept", variant: "primary" as const, actionType: "accept" as const },
+            { label: "Decline", variant: "danger" as const, actionType: "decline" as const },
+          ]
+        : undefined,
     action:
-      severity === "optimization"
-        ? { label: "Accept →", variant: "primary" }
-        : severity === "critical"
-          ? { label: "View Details →", variant: "primary" }
-          : undefined,
+      !isWeatherAlert && severity === "optimization" && isPending
+        ? { label: "Schedule", variant: "primary" }
+        : undefined,
   };
 }
 
@@ -465,8 +475,8 @@ function DashboardContent() {
     ? recommendation.optimized_schedule.map((s) => s.savings)
     : [8.4, 9.1, 11.3, 10.8, 12.5, 13.1, 14.2];
 
-  // Realtime live alerts from orchestrated simulations
-  const { liveAlerts } = useRealtimeAlerts(profile.gridRegion);
+  // Realtime live alerts from orchestrated simulations (personalized by profile)
+  const { liveAlerts } = useRealtimeAlerts(profile.gridRegion, profileId);
 
   // Realtime session — when operator runs a sim, switch scenario
   const { session: liveSession } = useRealtimeSession();
@@ -551,27 +561,55 @@ function DashboardContent() {
       .catch((err) => console.error("Failed to fetch alerts:", err));
   }, [profileId, scenario, profile.gridRegion, profile.weatherZone]);
 
-  // Handle alert accept action
+  // Legacy: if someone navigates to /dashboard with alertId params, redirect to respond page
+  useEffect(() => {
+    const alertId = searchParams.get("alertId");
+    const action = searchParams.get("action");
+    if (alertId && action) {
+      window.location.href = `/dashboard/respond?alertId=${alertId}&action=${action.toUpperCase()}&profileId=${profileId}`;
+    }
+  }, [searchParams, profileId]);
+
+  // Handle alert action (accept or decline) — removes from UI immediately
   const handleAlertAction = useCallback(
-    async (alertId: string) => {
+    async (alertId: string, actionType: "accept" | "decline" = "accept") => {
+      // Immediately hide this alert from UI
+      setDismissedAlertIds((prev) => new Set(prev).add(alertId));
+
       try {
-        const res = await fetch("/api/alerts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ alertId, profileId }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          // Mark alert as resolved in local state
-          setAlerts((prev) =>
-            prev.map((a) =>
-              a.id === alertId
-                ? { ...a, severity: "resolved" as const, action: undefined }
-                : a
-            )
-          );
-          // Update savings with the amount added
-          if (data.savings > 0) {
+        const weatherAlert = liveAlerts.find((a) => a.id === alertId);
+        const response = actionType === "accept" ? "ACCEPT" : "DECLINE";
+
+        if (weatherAlert && weatherAlert.alert_type?.startsWith("weather_")) {
+          const res = await fetch("/api/alerts/respond", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alertId, response }),
+          });
+          const data = await res.json();
+
+          if (data.ok) {
+            if (response === "ACCEPT" && data.savingsAdded > 0) {
+              // Update savings card in UI
+              setProfile((prev) => ({
+                ...prev,
+                estSavings: Math.round((prev.estSavings + data.savingsAdded) * 100) / 100,
+              }));
+              // Force XRPL panel to re-fetch fresh data
+              setXrplRefreshKey((k) => k + 1);
+            }
+          } else {
+            console.error("[alerts] Failed:", data.error);
+          }
+        } else {
+          // Legacy price alert endpoint
+          const res = await fetch("/api/alerts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alertId, profileId }),
+          });
+          const data = await res.json();
+          if (data.ok && data.savings > 0) {
             setProfile((prev) => ({
               ...prev,
               estSavings: Math.round((prev.estSavings + data.savings) * 100) / 100,
@@ -579,10 +617,10 @@ function DashboardContent() {
           }
         }
       } catch (err) {
-        console.error("Failed to accept alert:", err);
+        console.error("Failed to handle alert:", err);
       }
     },
-    [profileId]
+    [profileId, liveAlerts]
   );
 
   // Countdown to next risk — derive from price spike in forecast data
@@ -803,7 +841,7 @@ function DashboardContent() {
         {/*  ROW 3 — XRPL Rewards                                      */}
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 gap-6">
-          <XRPLWalletPanel householdId={householdId} profileId={profileId} />
+          <XRPLWalletPanel key={xrplRefreshKey} householdId={householdId} profileId={profileId} />
         </div>
 
         {/* ---------------------------------------------------------- */}
@@ -811,8 +849,32 @@ function DashboardContent() {
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 gap-6">
           <AlertsPanel
-            alerts={[...liveAlerts.map(mapLiveAlert), ...alerts]}
+            alerts={liveAlerts
+              .filter((a) =>
+                (!a.status || a.status === "pending") &&
+                !dismissedAlertIds.has(a.id)
+              )
+              .map(mapLiveAlert)}
             onAction={handleAlertAction}
+            onClearAll={() => {
+              const pendingAlerts = liveAlerts.filter(
+                (a) => (!a.status || a.status === "pending") && !dismissedAlertIds.has(a.id)
+              );
+              // Immediately hide all from UI
+              setDismissedAlertIds((prev) => {
+                const next = new Set(prev);
+                pendingAlerts.forEach((a) => next.add(a.id));
+                return next;
+              });
+              // Decline all in background
+              pendingAlerts.forEach((alert) =>
+                fetch("/api/alerts/respond", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ alertId: alert.id, response: "DECLINE" }),
+                }).catch(() => {})
+              );
+            }}
           />
         </div>
       </main>

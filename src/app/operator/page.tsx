@@ -586,13 +586,26 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
     setShowMapCascade(true);
 
     try {
-      const [cascadeResult] = await Promise.all([
+      const [cascadeResult, orchestrateResult] = await Promise.all([
         runCascadeSimulation(scenario, 36),
         fetch(
-          `/api/backend/orchestrate/run?scenario=${scenario}&forecast_hour=36&grid_region=ERCOT`,
+          `/api/orchestrate?scenario=${scenario}`,
           { method: "POST" }
-        ).catch((err) => console.error("Orchestration failed:", err)),
+        )
+          .then(r => r.json())
+          .then(data => {
+            console.log("[operator] Orchestration result:", data);
+            return data;
+          })
+          .catch((err) => {
+            console.error("Orchestration failed:", err);
+            return null;
+          }),
       ]);
+
+      if (orchestrateResult?.ok) {
+        console.log(`[operator] ✅ Created ${orchestrateResult.alertsCreated} alerts, sent ${orchestrateResult.notificationsSent} notifications`);
+      }
       setMapCascadeData(cascadeResult);
     } catch (err) {
       console.error("Failed to run cascade simulation:", err);

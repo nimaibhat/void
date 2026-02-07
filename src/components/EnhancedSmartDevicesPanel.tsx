@@ -228,6 +228,7 @@ export default function EnhancedSmartDevicesPanel({
   const [enodeDevices, setEnodeDevices] = useState<DeviceInfo[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
   // Fetch Enode devices
   const fetchEnodeDevices = useCallback(async () => {
@@ -245,12 +246,12 @@ export default function EnhancedSmartDevicesPanel({
     }
   }, [enodeUserId]);
 
-  // Poll Enode devices every 15s when connected
+  // Poll Enode devices every 10s when connected (faster refresh)
   useEffect(() => {
     if (!enodeUserId) return;
     fetchEnodeDevices();
     setPolling(true);
-    const interval = setInterval(fetchEnodeDevices, 15_000);
+    const interval = setInterval(fetchEnodeDevices, 10_000); // Poll every 10s
     return () => {
       clearInterval(interval);
       setPolling(false);
@@ -308,6 +309,51 @@ export default function EnhancedSmartDevicesPanel({
     deviceType: string,
     action: unknown
   ) => {
+    // Demo mode: Simulate state changes locally
+    if (demoMode) {
+      console.log(`[demo] Simulating action: ${deviceType} ${JSON.stringify(action)}`);
+
+      // Simulate state change
+      setEnodeDevices((prev) =>
+        prev.map((d) => {
+          if (d.id !== deviceId) return d;
+
+          // Simulate charger/vehicle state changes
+          if (deviceType === "charger" || deviceType === "vehicle") {
+            const isStart = action === "START";
+            return {
+              ...d,
+              chargeState: {
+                ...d.chargeState,
+                isCharging: isStart,
+                isPluggedIn: true, // Force plugged in for demo
+              },
+            };
+          }
+
+          // Simulate HVAC state changes
+          if (deviceType === "hvac" && typeof action === "object" && action !== null) {
+            const hvacAction = action as Record<string, unknown>;
+            return {
+              ...d,
+              thermostatState: {
+                ...d.thermostatState,
+                mode: (hvacAction.mode as string) || d.thermostatState?.mode,
+                heatSetpoint: (hvacAction.heatSetpoint as number) || d.thermostatState?.heatSetpoint,
+                coolSetpoint: (hvacAction.coolSetpoint as number) || d.thermostatState?.coolSetpoint,
+              },
+            };
+          }
+
+          return d;
+        })
+      );
+
+      alert("✅ Demo mode: State changed locally (not sent to Enode)");
+      return;
+    }
+
+    // Real mode: Call Enode API
     try {
       const res = await fetch(
         `/api/enode/devices/${encodeURIComponent(deviceId)}/actions`,
@@ -323,11 +369,32 @@ export default function EnhancedSmartDevicesPanel({
         console.log(
           `[enode] Action ${act.kind} → ${act.state}`
         );
-        // Refresh after 2s
-        setTimeout(fetchEnodeDevices, 2000);
+        // Aggressive refresh: immediately, then at 3s, 6s, and 10s
+        fetchEnodeDevices(); // Immediate
+        setTimeout(fetchEnodeDevices, 3000);
+        setTimeout(fetchEnodeDevices, 6000);
+        setTimeout(fetchEnodeDevices, 10000);
+      } else {
+        // Parse Enode error for user-friendly message
+        const errorMsg = data.error || "Unknown error";
+        if (errorMsg.includes("unplugged")) {
+          const useDemo = confirm(
+            "⚠️ Device is unplugged!\n\n" +
+            "Options:\n" +
+            "• OK: Enable Demo Mode (simulate locally)\n" +
+            "• Cancel: Go to Enode Sandbox and plug in device manually"
+          );
+          if (useDemo) setDemoMode(true);
+        } else if (errorMsg.includes("unreachable")) {
+          alert("⚠️ Device is offline!\n\nCheck that the device is online in Enode Sandbox");
+        } else {
+          alert(`❌ Action failed:\n${errorMsg.substring(0, 200)}`);
+        }
+        console.error("[enode] Action failed:", errorMsg);
       }
-    } catch {
-      /* silent */
+    } catch (err) {
+      console.error("[enode] Action error:", err);
+      alert("❌ Network error. Check console for details.");
     }
   };
 
@@ -360,12 +427,25 @@ export default function EnhancedSmartDevicesPanel({
               {connecting ? "Connecting..." : "Connect Devices"}
             </button>
           ) : (
-            <button
-              onClick={fetchEnodeDevices}
-              className="text-[10px] font-mono px-2 py-1 rounded border border-white/[0.08] text-white/30 hover:text-[#22c55e]/70 hover:border-[#22c55e]/30 transition-all cursor-pointer"
-            >
-              Refresh
-            </button>
+            <>
+              <button
+                onClick={() => setDemoMode(!demoMode)}
+                className={`text-[10px] font-mono px-2 py-1 rounded border transition-all cursor-pointer ${
+                  demoMode
+                    ? "border-amber-400/30 text-amber-400/70 bg-amber-400/[0.04]"
+                    : "border-white/[0.08] text-white/30 hover:text-white/50"
+                }`}
+                title={demoMode ? "Demo Mode: ON (simulated states)" : "Demo Mode: OFF (real Enode API)"}
+              >
+                {demoMode ? "DEMO" : "REAL"}
+              </button>
+              <button
+                onClick={fetchEnodeDevices}
+                className="text-[10px] font-mono px-2 py-1 rounded border border-white/[0.08] text-white/30 hover:text-[#22c55e]/70 hover:border-[#22c55e]/30 transition-all cursor-pointer"
+              >
+                Refresh
+              </button>
+            </>
           )}
         </div>
       </div>

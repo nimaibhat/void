@@ -6,6 +6,7 @@ triggering Realtime events that the frontend subscribes to.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -27,6 +28,8 @@ from app.services.grid_graph_service import grid_graph
 from app.services.price_service import price_service
 from app.services.claude_service import enhance_alerts
 from app.services.utility_service import get_crews
+from app.services.weather_alert_service import generate_weather_alerts
+from app.services.alert_notification_service import broadcast_weather_alerts
 
 logger = logging.getLogger("blackout.orchestrator")
 
@@ -83,6 +86,22 @@ def _insert_alerts(alerts: List[Dict[str, Any]]) -> None:
         timeout=10,
     )
     resp.raise_for_status()
+
+
+def _fetch_all_consumer_profiles() -> List[Dict[str, Any]]:
+    """Fetch all consumer profiles from Supabase."""
+    try:
+        resp = requests.get(
+            _sb_url("consumer_profiles"),
+            params={"select": "*"},
+            headers=_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Failed to fetch consumer profiles: %s", exc)
+        return []
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────
@@ -156,7 +175,47 @@ def run_orchestrated_simulation(
     # ── 5. Generate alerts ───────────────────────────────────────
     alerts: List[Dict[str, Any]] = []
 
-    # 5a. Cascade warning
+    # 5a. Generate personalized weather alerts for each consumer
+    consumer_profiles = _fetch_all_consumer_profiles()
+    logger.info("Orchestrator: generating weather alerts for %d consumer profiles", len(consumer_profiles))
+
+    for profile in consumer_profiles:
+        profile_id = profile.get("id")
+        if not profile_id:
+            continue
+
+        try:
+            # Generate weather-based alerts for this consumer
+            weather_alerts = asyncio.run(generate_weather_alerts(
+                profile_id=profile_id,
+                region=grid_region,
+                scenario="uri_2021" if scenario == "uri" else "normal",
+            ))
+
+            # Convert DeviceAlert objects to live_alerts format
+            for wa in weather_alerts:
+                alerts.append({
+                    "session_id": session_id,
+                    "profile_id": profile_id,  # Link to specific consumer
+                    "grid_region": grid_region,
+                    "severity": wa.severity,
+                    "title": wa.title,
+                    "description": wa.description,
+                    "alert_type": f"weather_{wa.device_type}",
+                    "metadata": {
+                        "device_type": wa.device_type,
+                        "recommended_action": wa.recommended_action,
+                        "estimated_savings_usd": wa.estimated_savings_usd,
+                        "weather_reason": wa.weather_reason,
+                        **wa.metadata,
+                    },
+                })
+        except Exception as exc:
+            logger.warning("Failed to generate weather alerts for profile %s: %s", profile_id, exc)
+
+    logger.info("Orchestrator: generated %d personalized weather alerts", len(alerts))
+
+    # 5b. Cascade warning
     if cascade_result["total_failed_nodes"] > 0:
         alerts.append({
             "session_id": session_id,
@@ -176,7 +235,7 @@ def run_orchestrated_simulation(
             },
         })
 
-    # 5b. Price spike alert
+    # 5c. Price spike alert
     if peak_price > 100:
         severity = "critical" if peak_price > 1000 else "warning"
         alerts.append({
@@ -195,7 +254,7 @@ def run_orchestrated_simulation(
             },
         })
 
-    # 5c. Device savings alert (for consumers with smart devices)
+    # 5d. Device savings alert (for consumers with smart devices)
     if peak_price > 50:
         consumer_peak = max(p.consumer_price_kwh for p in prices) if prices else 0
         consumer_low = min(p.consumer_price_kwh for p in prices) if prices else 0
@@ -216,7 +275,7 @@ def run_orchestrated_simulation(
             },
         })
 
-    # 5d. Load shed warning
+    # 5e. Load shed warning
     if cascade_result["total_load_shed_mw"] > 500:
         alerts.append({
             "session_id": session_id,
@@ -238,6 +297,20 @@ def run_orchestrated_simulation(
     alerts = enhance_alerts(alerts)
 
     _insert_alerts(alerts)
+
+    # Broadcast weather alerts via ntfy push notifications
+    weather_alerts = [a for a in alerts if a.get("alert_type", "").startswith("weather_")]
+    if weather_alerts:
+        try:
+            notification_result = asyncio.run(broadcast_weather_alerts(weather_alerts))
+            logger.info(
+                "Orchestrator: sent %d weather notifications (%d failed)",
+                notification_result.get("success", 0),
+                notification_result.get("failed", 0),
+            )
+        except Exception as exc:
+            logger.error("Failed to broadcast weather alerts: %s", exc)
+
     _update_session(session_id, {
         "status": "alerts_done",
         "alerts_generated": len(alerts),
