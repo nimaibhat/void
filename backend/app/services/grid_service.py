@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from app.services import demand_service
+from app.services import demand_service, overview_service
 from app.services.cascade_service import run_cascade
 from app.services.grid_graph_service import grid_graph
 
@@ -196,11 +196,26 @@ async def get_cascade_probability(
         # Run actual cascade simulation
         logger.info(f"Running cascade simulation for {scenario} h={forecast_hour} (not cached)")
         multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
+
+        # Get weather data for cold-weather failure simulation (Uri scenario)
+        weather_by_zone = None
+        if scenario in ("uri", "uri_2021"):
+            overview = overview_service.get_overview(scenario)
+            weather_by_zone = {
+                r.name: {
+                    "temp_f": r.weather.temp_f,
+                    "wind_mph": r.weather.wind_mph,
+                    "is_extreme": r.weather.is_extreme,
+                }
+                for r in overview.regions
+            }
+
         cascade_result = run_cascade(
             graph=grid_graph.graph,
             demand_multipliers=multipliers,
             scenario_label=f"{scenario}_cascade_prob",
             forecast_hour=forecast_hour,
+            weather_by_zone=weather_by_zone,
         )
 
         # Cache the result

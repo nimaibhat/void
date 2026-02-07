@@ -32,9 +32,10 @@ TOD_CURVE: Dict[int, float] = {
     18: 1.15, 19: 1.15, 20: 1.12, 21: 1.05, 22: 0.90, 23: 0.78,
 }
 
-# During Uri, actual demand was ~65% higher than served load due to forced
+# During Uri, actual demand was ~45% higher than served load due to forced
 # load shedding. This factor restores the uncurtailed demand estimate.
-URI_DEMAND_UPLIFT = 1.65
+# Historical peak: ~69 GW actual demand vs ~47.5 GW served = 1.45x multiplier
+URI_DEMAND_UPLIFT = 1.45
 
 # ── ML model (lazy-loaded) ─────────────────────────────────────────
 
