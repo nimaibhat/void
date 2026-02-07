@@ -129,6 +129,16 @@ body::before {
   to { transform: scaleY(1); }
 }
 
+/* Operator ticker scroll */
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-33.333%);
+  }
+}
+
 /* Critical alert pulse */
 @keyframes alert-pulse {
   0%, 100% {
@@ -136,5 +146,12 @@ body::before {
   }
   50% {
     border-left-color: rgba(239, 68, 68, 0.35);
+  }
+}
+
+/* SVG edge dash flow for cascade simulation */
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -8;
   }
 }

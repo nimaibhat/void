@@ -15,6 +15,7 @@ import {
   SiTailwindcss,
   SiMapbox,
   SiXstate,
+  SiThreedotjs,
 } from "react-icons/si";
 import { TbBrandNetbeans } from "react-icons/tb";
 import { FaChartBar } from "react-icons/fa";
@@ -68,6 +69,7 @@ const rightTech: TechItem[] = [
   { name: "React", icon: SiReact },
   { name: "TypeScript", icon: SiTypescript },
   { name: "Tailwind", icon: SiTailwindcss },
+  { name: "Three.js", icon: SiThreedotjs },
   { name: "Mapbox", icon: SiMapbox },
   { name: "Recharts", icon: FaChartBar },
   { name: "XGBoost", icon: SiXstate },
@@ -673,15 +675,10 @@ function CitizenPanel({ onEnter }: { onEnter?: () => void }) {
               </span>
             </div>
 
-            <div className="h-px bg-[#22c55e]/10 flex-shrink-0" />
-
-            {/* Terminal feed */}
-            <TerminalFeed lines={citizenFeed} delay={1400} initialDelay={2000} />
-
             {/* Enter button */}
             <button
               onClick={onEnter}
-              className="w-full font-mono rounded-md border border-[#22c55e]/30 text-[#22c55e]/70 bg-[#22c55e]/[0.04] hover:bg-[#22c55e]/[0.12] hover:border-[#22c55e]/60 hover:text-[#22c55e] transition-all duration-300 cursor-pointer flex-shrink-0"
+              className="mt-auto w-full font-mono rounded-md border border-[#22c55e]/30 text-[#22c55e]/70 bg-[#22c55e]/[0.04] hover:bg-[#22c55e]/[0.12] hover:border-[#22c55e]/60 hover:text-[#22c55e] transition-all duration-300 cursor-pointer flex-shrink-0"
               style={{ padding: "14px 0", fontSize: "13px" }}
             >
               Enter Citizen View →
