@@ -1,7 +1,7 @@
 /**
  * GET /api/enode/devices?userId=<userId>
  *
- * List all connected devices (chargers, HVACs, batteries, vehicles,
+ * List all connected devices (chargers, HVAC, batteries, vehicles,
  * solar inverters) for a given Enode user.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const userId = req.nextUrl.searchParams.get("userId");
     if (!userId) {
       return NextResponse.json(
-        { ok: false, error: "userId query parameter is required" },
+        { ok: false, error: "userId query param is required" },
         { status: 400 }
       );
     }

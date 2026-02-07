@@ -15,10 +15,12 @@ import {
   SiTailwindcss,
   SiMapbox,
   SiXstate,
+  SiThreedotjs,
 } from "react-icons/si";
 import { TbBrandNetbeans } from "react-icons/tb";
 import { FaChartBar } from "react-icons/fa";
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { IconType } from "react-icons";
 
 const ParticleGlobe = dynamic(() => import("@/components/ParticleGlobe"), {
@@ -68,6 +70,7 @@ const rightTech: TechItem[] = [
   { name: "React", icon: SiReact },
   { name: "TypeScript", icon: SiTypescript },
   { name: "Tailwind", icon: SiTailwindcss },
+  { name: "Three.js", icon: SiThreedotjs },
   { name: "Mapbox", icon: SiMapbox },
   { name: "Recharts", icon: FaChartBar },
   { name: "XGBoost", icon: SiXstate },
@@ -327,7 +330,7 @@ const gridNodes = [
   { id: "N-06", status: "offline" },
 ];
 
-function OperatorPanel() {
+function OperatorPanel({ onEnter }: { onEnter?: () => void }) {
   const loadData = [32, 45, 38, 52, 61, 78, 72, 85, 91, 80, 68, 55, 48, 63, 77, 88];
 
   return (
@@ -499,6 +502,7 @@ function OperatorPanel() {
 
             {/* Enter button */}
             <button
+              onClick={onEnter}
               className="w-full font-mono rounded-md border border-[#22c55e]/30 text-[#22c55e]/70 bg-[#22c55e]/[0.04] hover:bg-[#22c55e]/[0.12] hover:border-[#22c55e]/60 hover:text-[#22c55e] transition-all duration-300 cursor-pointer flex-shrink-0"
               style={{ padding: "14px 0", fontSize: "13px" }}
             >
@@ -673,15 +677,10 @@ function CitizenPanel({ onEnter }: { onEnter?: () => void }) {
               </span>
             </div>
 
-            <div className="h-px bg-[#22c55e]/10 flex-shrink-0" />
-
-            {/* Terminal feed */}
-            <TerminalFeed lines={citizenFeed} delay={1400} initialDelay={2000} />
-
             {/* Enter button */}
             <button
               onClick={onEnter}
-              className="w-full font-mono rounded-md border border-[#22c55e]/30 text-[#22c55e]/70 bg-[#22c55e]/[0.04] hover:bg-[#22c55e]/[0.12] hover:border-[#22c55e]/60 hover:text-[#22c55e] transition-all duration-300 cursor-pointer flex-shrink-0"
+              className="mt-auto w-full font-mono rounded-md border border-[#22c55e]/30 text-[#22c55e]/70 bg-[#22c55e]/[0.04] hover:bg-[#22c55e]/[0.12] hover:border-[#22c55e]/60 hover:text-[#22c55e] transition-all duration-300 cursor-pointer flex-shrink-0"
               style={{ padding: "14px 0", fontSize: "13px" }}
             >
               Enter Citizen View →
@@ -752,11 +751,11 @@ function AnimatedStat({
 /*  Main page                                                         */
 /* ------------------------------------------------------------------ */
 export default function Home() {
+  const router = useRouter();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const handleProfileSelect = (profile: ConsumerProfile) => {
-    console.log("Profile selected for dashboard:", profile);
-    // TODO: route to citizen dashboard with profile data
+    router.push(`/dashboard?zip=${encodeURIComponent(profile.zip)}&name=${encodeURIComponent(profile.name)}`);
   };
 
   return (
@@ -820,7 +819,7 @@ export default function Home() {
             className="flex items-center pointer-events-auto flex-shrink-0"
             style={{ marginLeft: '3rem' }}
           >
-            <OperatorPanel />
+            <OperatorPanel onEnter={() => router.push("/operator")} />
           </motion.div>
 
           {/* Center — globe shows through + tagline */}

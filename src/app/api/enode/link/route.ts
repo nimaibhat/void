@@ -3,6 +3,7 @@
  *
  * Generate an Enode Link UI session. The returned URL opens a modal
  * where the user "logs into" a virtual vendor to connect sandbox devices.
+ *
  * This also implicitly creates the Enode user if they don't exist yet.
  *
  * Body: { userId: string, vendor?: string }
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // After linking, Enode redirects here
     const redirectUri =
       process.env.ENODE_REDIRECT_URI ??
       `${req.nextUrl.origin}/devices?linked=true`;

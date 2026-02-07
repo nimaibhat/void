@@ -20,7 +20,6 @@ html,
 body {
   background: #0a0a0a;
   color: var(--foreground);
-  overflow: hidden;
   width: 100%;
   height: 100%;
 }
@@ -128,4 +127,31 @@ body::before {
 @keyframes bar-grow {
   from { transform: scaleY(0); }
   to { transform: scaleY(1); }
+}
+
+/* Operator ticker scroll */
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-33.333%);
+  }
+}
+
+/* Critical alert pulse */
+@keyframes alert-pulse {
+  0%, 100% {
+    border-left-color: #ef4444;
+  }
+  50% {
+    border-left-color: rgba(239, 68, 68, 0.35);
+  }
+}
+
+/* SVG edge dash flow for cascade simulation */
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
 }

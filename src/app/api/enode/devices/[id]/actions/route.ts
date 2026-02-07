@@ -2,6 +2,16 @@
  * POST /api/enode/devices/[id]/actions
  *
  * Send a command to a specific device.
+ *
+ * Body:
+ *   { deviceType: "charger" | "hvac" | "vehicle", action: ... }
+ *
+ * For chargers/vehicles:
+ *   { deviceType: "charger", action: "START" | "STOP" }
+ *
+ * For HVAC:
+ *   { deviceType: "hvac", action: { mode?: string, heatSetpoint?: number, coolSetpoint?: number } }
+ *   { deviceType: "hvac", action: "FOLLOW_SCHEDULE" }
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -44,7 +54,10 @@ export async function POST(
         break;
       default:
         return NextResponse.json(
-          { ok: false, error: `Unsupported deviceType: ${deviceType}` },
+          {
+            ok: false,
+            error: `Unsupported deviceType: ${deviceType}. Use charger, hvac, or vehicle.`,
+          },
           { status: 400 }
         );
     }

@@ -153,7 +153,9 @@ export interface LinkSession {
 
 /**
  * Generate a Link UI session so the user can connect virtual devices.
+ *
  * This also implicitly creates the user if they don't already exist.
+ *
  * Required fields: redirectUri, scopes, language
  */
 export function createLinkSession(
@@ -192,14 +194,20 @@ export interface Charger extends DeviceBase {
     chargeRate: number | null;
     powerDelivery: number | null;
   };
-  information: { brand: string; model: string };
+  information: {
+    brand: string;
+    model: string;
+  };
 }
 
 export interface HvacSystem extends DeviceBase {
   currentTemperature: number | null;
   targetTemperature: number | null;
   operationMode: string | null;
-  information: { brand: string; model: string };
+  information: {
+    brand: string;
+    model: string;
+  };
 }
 
 export interface Battery extends DeviceBase {
@@ -208,7 +216,10 @@ export interface Battery extends DeviceBase {
     isCharging: boolean;
     chargeRate: number | null;
   };
-  information: { brand: string; model: string };
+  information: {
+    brand: string;
+    model: string;
+  };
 }
 
 export interface Vehicle extends DeviceBase {
@@ -219,7 +230,11 @@ export interface Vehicle extends DeviceBase {
     isCharging: boolean;
     chargeRate: number | null;
   };
-  information: { brand: string; model: string; year: number | null };
+  information: {
+    brand: string;
+    model: string;
+    year: number | null;
+  };
 }
 
 export interface SolarInverter extends DeviceBase {
@@ -227,7 +242,10 @@ export interface SolarInverter extends DeviceBase {
     isProducing: boolean;
     productionRate: number | null;
   };
-  information: { brand: string; model: string };
+  information: {
+    brand: string;
+    model: string;
+  };
 }
 
 export type AnyDevice = (
@@ -240,18 +258,27 @@ export type AnyDevice = (
   deviceType: "charger" | "hvac" | "battery" | "vehicle" | "solarInverter";
 };
 
+/** List all chargers for a user. */
 export function listChargers(userId: string) {
   return enodeFetch<{ data: Charger[] }>(`/users/${userId}/chargers`);
 }
+
+/** List all HVAC systems for a user. */
 export function listHvacs(userId: string) {
   return enodeFetch<{ data: HvacSystem[] }>(`/users/${userId}/hvacs`);
 }
+
+/** List all batteries for a user. */
 export function listBatteries(userId: string) {
   return enodeFetch<{ data: Battery[] }>(`/users/${userId}/batteries`);
 }
+
+/** List all vehicles for a user. */
 export function listVehicles(userId: string) {
   return enodeFetch<{ data: Vehicle[] }>(`/users/${userId}/vehicles`);
 }
+
+/** List all solar inverters for a user. */
 export function listSolarInverters(userId: string) {
   return enodeFetch<{ data: SolarInverter[] }>(
     `/users/${userId}/solar-inverters`
@@ -273,7 +300,10 @@ export async function listAllDevices(userId: string): Promise<AnyDevice[]> {
     ...hvacs.data.map((d) => ({ ...d, deviceType: "hvac" as const })),
     ...batteries.data.map((d) => ({ ...d, deviceType: "battery" as const })),
     ...vehicles.data.map((d) => ({ ...d, deviceType: "vehicle" as const })),
-    ...solar.data.map((d) => ({ ...d, deviceType: "solarInverter" as const })),
+    ...solar.data.map((d) => ({
+      ...d,
+      deviceType: "solarInverter" as const,
+    })),
   ];
 }
 
@@ -301,6 +331,7 @@ export function controlCharging(chargerId: string, action: "START" | "STOP") {
 
 /**
  * Set a permanent hold on an HVAC (thermostat).
+ * The device's capabilities determine valid modes and setpoint ranges.
  * Example: { mode: "HEAT", heatSetpoint: 22 }
  */
 export function controlHvac(

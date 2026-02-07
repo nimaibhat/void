@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.mcp.json
 
 # debug
 npm-debug.log*
@@ -32,6 +33,19 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# CDS API credentials
+.cdsapirc
+
+# weather forecast cache
+/backend/cache/
+
+# large data files (MATPOWER, ERCOT xlsx)
+/backend/app/data/
+
+# python
+__pycache__/
+*.pyc
 
 # vercel
 .vercel
