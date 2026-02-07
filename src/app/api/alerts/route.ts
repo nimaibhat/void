@@ -26,9 +26,14 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g = globalThis as any;
 const ACTIONS_KEY = "__blackout_alert_actions__";
+const SAVINGS_KEY = "__blackout_alert_savings__";
 if (!g[ACTIONS_KEY]) g[ACTIONS_KEY] = new Map<string, AlertAction>();
+if (!g[SAVINGS_KEY]) g[SAVINGS_KEY] = new Map<string, number>();
 function getActionsStore(): Map<string, AlertAction> {
   return g[ACTIONS_KEY];
+}
+function getSavingsStore(): Map<string, number> {
+  return g[SAVINGS_KEY];
 }
 
 /* ------------------------------------------------------------------ */
@@ -76,10 +81,14 @@ export async function GET(req: NextRequest) {
     result.ruleAnalysis
   );
 
-  // Store actions so POST can look them up
+  // Store actions + savings so POST can look them up
   const store = getActionsStore();
+  const savingsStore = getSavingsStore();
   for (const action of result.actions) {
     store.set(action.alertId, action);
+  }
+  for (const item of result.ruleAnalysis) {
+    savingsStore.set(item.alertId, item.savingsDollars);
   }
 
   return NextResponse.json({
@@ -178,14 +187,34 @@ export async function POST(req: NextRequest) {
       ],
     });
 
-    // Remove from store
+    // Increment savings in Supabase for this profile
+    const savingsStore = getSavingsStore();
+    const savingsAmount = savingsStore.get(alertId) ?? 0;
+    if (profileId && savingsAmount > 0) {
+      // Fetch current savings, then increment
+      const { data: profile } = await supabase
+        .from("consumer_profiles")
+        .select("estimated_savings_dollars")
+        .eq("id", profileId)
+        .single();
+
+      const current = Number(profile?.estimated_savings_dollars) || 0;
+      await supabase
+        .from("consumer_profiles")
+        .update({ estimated_savings_dollars: Math.round((current + savingsAmount) * 100) / 100 })
+        .eq("id", profileId);
+    }
+
+    // Remove from stores
     store.delete(alertId);
+    savingsStore.delete(alertId);
 
     return NextResponse.json({
       ok: true,
       alertId,
       action: action.actionType,
       device: action.deviceName,
+      savings: savingsAmount,
       enodeResult,
       enodeError,
     });

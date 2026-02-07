@@ -1188,7 +1188,7 @@ export default function CascadeOverlay({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
           className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: "rgba(0,0,0,0.92)", backdropFilter: "blur(8px)" }}
+          style={{ background: "rgba(0,0,0,0.40)", backdropFilter: "blur(12px)" }}
           onClick={onClose}
         >
           {/* Modal panel */}

@@ -770,6 +770,13 @@ function DashboardContent() {
                 : a
             )
           );
+          // Update savings with the amount added
+          if (data.savings > 0) {
+            setProfile((prev) => ({
+              ...prev,
+              estSavings: Math.round((prev.estSavings + data.savings) * 100) / 100,
+            }));
+          }
         }
       } catch (err) {
         console.error("Failed to accept alert:", err);
