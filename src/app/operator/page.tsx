@@ -728,6 +728,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
         scenario={scenarioLabel}
         scenarioKey={scenario}
         region="ERCOT"
+        session={liveSession}
       />
 
       {/* EIA Data Panel */}

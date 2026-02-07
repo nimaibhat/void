@@ -155,3 +155,10 @@ body::before {
     stroke-dashoffset: -8;
   }
 }
+
+/* Pipeline spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

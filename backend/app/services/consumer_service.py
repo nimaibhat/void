@@ -7,11 +7,15 @@ charge/discharge cycles for home batteries, and solar export timing.
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+import requests
+
+from app.config import settings
 from app.models.consumer import (
     ActionCategory,
     Alert,
@@ -28,6 +32,8 @@ from app.models.consumer import (
 )
 from app.models.price import HourlyPrice, PricingMode
 from app.services.price_service import price_service
+
+logger = logging.getLogger("blackout.consumer")
 
 # ── Built-in profiles ────────────────────────────────────────────────
 
@@ -141,9 +147,51 @@ _custom_profiles: Dict[str, ConsumerProfile] = {}
 # ── Profile management ───────────────────────────────────────────────
 
 
+def _fetch_profile_from_supabase(profile_id: str) -> Optional[ConsumerProfile]:
+    """Fetch a consumer profile from Supabase by UUID."""
+    url = settings.supabase_url
+    key = settings.supabase_anon_key
+    if not url or not key:
+        return None
+    try:
+        resp = requests.get(
+            f"{url}/rest/v1/consumer_profiles",
+            params={"id": f"eq.{profile_id}", "select": "*"},
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if not rows:
+            return None
+        row = rows[0]
+        profile = ConsumerProfile(
+            profile_id=row["id"],
+            name=row.get("name", "Unknown"),
+            profile_type=ProfileType.CUSTOM,
+            household_size=row.get("household_size") or 3,
+            square_footage=row.get("square_footage") or 1500,
+            has_solar=row.get("has_solar", False),
+            has_battery=row.get("has_battery", False),
+            has_ev=row.get("has_ev", False),
+            hvac_type=row.get("hvac_type") or "central_ac",
+            avg_monthly_kwh=float(row.get("avg_monthly_kwh") or 800),
+        )
+        # Cache so subsequent calls are fast
+        _custom_profiles[profile_id] = profile
+        return profile
+    except Exception as exc:
+        logger.warning("Failed to fetch profile %s from Supabase: %s", profile_id, exc)
+        return None
+
+
 def _get_profile(profile_id: str) -> Optional[ConsumerProfile]:
-    """Look up a profile by ID (built-in or custom)."""
-    return PROFILES.get(profile_id) or _custom_profiles.get(profile_id)
+    """Look up a profile by ID (built-in, custom, or Supabase)."""
+    return (
+        PROFILES.get(profile_id)
+        or _custom_profiles.get(profile_id)
+        or _fetch_profile_from_supabase(profile_id)
+    )
 
 
 async def get_profiles() -> ConsumerProfilesResponse:
@@ -202,7 +250,21 @@ def _optimize_appliances(
     prices: List[HourlyPrice],
 ) -> List[OptimizedSchedule]:
     """Find cheapest run window for each flexible appliance."""
-    appliances = PROFILE_APPLIANCES.get(profile_id, [])
+    appliances = PROFILE_APPLIANCES.get(profile_id)
+    if appliances is None:
+        # Dynamic Supabase profile — use generic appliance set
+        profile = _custom_profiles.get(profile_id)
+        appliances = [
+            Appliance(name="Dishwasher", power_kw=1.8, duration_hours=1.5,
+                      preferred_start=19, category=ActionCategory.APPLIANCE),
+            Appliance(name="Water Heater", power_kw=4.5, duration_hours=1.0,
+                      preferred_start=7, category=ActionCategory.APPLIANCE),
+        ]
+        if profile and profile.has_ev:
+            appliances.append(
+                Appliance(name="EV Charger", power_kw=7.2, duration_hours=3.0,
+                          preferred_start=18, category=ActionCategory.EV)
+            )
     schedule: List[OptimizedSchedule] = []
 
     for app in appliances:
@@ -258,7 +320,12 @@ def _optimize_battery(
     """
     spec = BATTERY_SPECS.get(profile_id)
     if spec is None:
-        return 0.0, 0.0
+        # Dynamic profiles from Supabase: use default battery if profile has one
+        profile = _custom_profiles.get(profile_id)
+        if profile and profile.has_battery:
+            spec = (13.5, 5.0)
+        else:
+            return 0.0, 0.0
 
     capacity_kwh, charge_rate_kw = spec
     charge_hours = int(math.ceil(capacity_kwh / charge_rate_kw))
@@ -296,7 +363,12 @@ def _calculate_solar_savings(
     """
     spec = SOLAR_SPECS.get(profile_id)
     if spec is None:
-        return 0.0, 0.0
+        # Dynamic profiles from Supabase: use default solar if profile has it
+        profile = _custom_profiles.get(profile_id)
+        if profile and profile.has_solar:
+            spec = (7.5, 0.85)
+        else:
+            return 0.0, 0.0
 
     panel_kw, efficiency = spec
     total_savings = 0.0

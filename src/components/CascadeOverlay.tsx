@@ -9,6 +9,7 @@ import {
   Fragment,
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import type { SimulationSession } from "@/hooks/useRealtimeSession";
 
 /* ================================================================== */
 /*  TYPES                                                              */
@@ -19,6 +20,7 @@ export interface CascadeOverlayProps {
   region?: string;
   scenario?: string;
   scenarioKey?: string;
+  session?: SimulationSession | null;
 }
 
 type NodeState = "healthy" | "stressed" | "overloaded" | "failed";
@@ -880,6 +882,249 @@ function ImpactAnalysis({
 }
 
 /* ================================================================== */
+/*  PIPELINE STEP STATUS                                               */
+/* ================================================================== */
+type StepStatus = "pending" | "running" | "completed";
+
+interface PipelineStep {
+  label: string;
+  status: StepStatus;
+  metrics?: { label: string; value: string }[];
+}
+
+function PipelineStepRow({ step, index }: { step: PipelineStep; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05 }}
+      className={`flex items-center gap-4 px-5 py-4 rounded-xl border transition-colors ${
+        step.status === "running"
+          ? "bg-[#22c55e]/[0.04] border-[#22c55e]/20"
+          : step.status === "completed"
+            ? "bg-[#111111] border-[#1a1a1a]"
+            : "bg-[#0a0a0a] border-[#1a1a1a]/50"
+      }`}
+    >
+      {/* Status indicator */}
+      <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
+        {step.status === "pending" && (
+          <div className="w-3 h-3 rounded-full bg-[#3f3f46]" />
+        )}
+        {step.status === "running" && (
+          <div
+            className="w-5 h-5 rounded-full border-2 border-[#22c55e] border-t-transparent"
+            style={{ animation: "spin 1s linear infinite" }}
+          />
+        )}
+        {step.status === "completed" && (
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="10" fill="#22c55e" fillOpacity="0.15" />
+            <path d="M6 10.5L8.5 13L14 7.5" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+
+      {/* Label */}
+      <span
+        className={`text-sm font-medium flex-1 ${
+          step.status === "pending"
+            ? "text-[#52525b]"
+            : step.status === "running"
+              ? "text-white"
+              : "text-[#a1a1aa]"
+        }`}
+      >
+        {step.label}
+      </span>
+
+      {/* Metrics */}
+      {step.status === "completed" && step.metrics && (
+        <div className="flex items-center gap-3">
+          {step.metrics.map((m) => (
+            <span
+              key={m.label}
+              className="text-xs font-mono text-[#22c55e] bg-[#22c55e]/[0.08] px-2.5 py-1 rounded-md border border-[#22c55e]/15"
+            >
+              {m.label}: {m.value}
+            </span>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+/* ================================================================== */
+/*  LIVE PIPELINE                                                      */
+/* ================================================================== */
+const STATUS_ORDER = ["running", "cascade_done", "prices_done", "alerts_done", "completed"];
+
+function getStepStatus(sessionStatus: string, completesAt: string): StepStatus {
+  const currentIdx = STATUS_ORDER.indexOf(sessionStatus);
+  const completesIdx = STATUS_ORDER.indexOf(completesAt);
+  if (currentIdx < 0) return "pending";
+  if (currentIdx >= completesIdx) return "completed";
+  if (currentIdx === completesIdx - 1) return "running";
+  return "pending";
+}
+
+function LivePipeline({
+  session,
+  onViewAnalysis,
+}: {
+  session: SimulationSession | null | undefined;
+  onViewAnalysis: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+
+  // Elapsed timer
+  useEffect(() => {
+    if (!session?.created_at) {
+      setElapsed(0);
+      return;
+    }
+    const start = new Date(session.created_at).getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [session?.created_at]);
+
+  if (!session) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-3 h-3 rounded-full bg-[#3f3f46] mx-auto" />
+          <p className="text-sm font-mono text-[#52525b]">Waiting for simulation...</p>
+          <p className="text-xs text-[#3f3f46]">Click &ldquo;Run Simulation&rdquo; to start the orchestration pipeline</p>
+        </div>
+      </div>
+    );
+  }
+
+  const status = session.status;
+  const isCompleted = status === "completed";
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+
+  const steps: PipelineStep[] = [
+    {
+      label: "Demand Analysis",
+      status: getStepStatus(status, "cascade_done"),
+    },
+    {
+      label: "Cascade Simulation",
+      status: getStepStatus(status, "cascade_done"),
+      metrics:
+        getStepStatus(status, "cascade_done") === "completed"
+          ? [
+              { label: "Failed", value: `${session.total_failed_nodes ?? 0} nodes` },
+              { label: "Depth", value: `${session.cascade_depth ?? 0}` },
+              { label: "Shed", value: `${Math.round(session.total_load_shed_mw ?? 0)} MW` },
+            ]
+          : undefined,
+    },
+    {
+      label: "Price Forecast",
+      status: getStepStatus(status, "prices_done"),
+      metrics:
+        getStepStatus(status, "prices_done") === "completed"
+          ? [
+              { label: "Peak", value: `$${Math.round(session.peak_price_mwh ?? 0)}/MWh` },
+              { label: "Avg", value: `$${Math.round(session.avg_price_mwh ?? 0)}/MWh` },
+            ]
+          : undefined,
+    },
+    {
+      label: "Alert Generation",
+      status: getStepStatus(status, "alerts_done"),
+      metrics:
+        getStepStatus(status, "alerts_done") === "completed"
+          ? [{ label: "Alerts", value: `${session.alerts_generated ?? 0}` }]
+          : undefined,
+    },
+    {
+      label: "Crew Dispatch",
+      status: getStepStatus(status, "completed"),
+      metrics:
+        getStepStatus(status, "completed") === "completed"
+          ? [
+              { label: "Crews", value: `${session.crews_dispatched ?? 0}` },
+              { label: "Avg ETA", value: `${Math.round(session.avg_eta_minutes ?? 0)} min` },
+            ]
+          : undefined,
+    },
+  ];
+
+  const completedCount = steps.filter((s) => s.status === "completed").length;
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Header */}
+      <div className="mb-6 flex-shrink-0">
+        <h2 className="text-2xl font-bold text-white">Live Pipeline</h2>
+        <p className="text-sm text-[#a1a1aa] mt-1">
+          Real-time orchestration progress &middot; {session.scenario} &middot; {session.grid_region}
+        </p>
+      </div>
+
+      {/* Elapsed + Progress */}
+      <div className="flex items-center justify-between mb-6 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <span className="text-xs uppercase tracking-widest text-[#52525b]">Elapsed</span>
+          <span className="text-lg font-mono font-bold text-white">
+            {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs uppercase tracking-widest text-[#52525b]">Progress</span>
+          <span className="text-lg font-mono font-bold text-white">{completedCount}/5</span>
+          <div className="w-32 h-2 rounded-full bg-[#1a1a1a] overflow-hidden">
+            <motion.div
+              className="h-full rounded-full bg-[#22c55e]"
+              initial={{ width: 0 }}
+              animate={{ width: `${(completedCount / 5) * 100}%` }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-3 flex-1">
+        {steps.map((step, i) => (
+          <PipelineStepRow key={step.label} step={step} index={i} />
+        ))}
+      </div>
+
+      {/* Completion card */}
+      {isCompleted && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mt-6 flex-shrink-0 bg-[#22c55e]/[0.04] border border-[#22c55e]/20 rounded-xl p-6 flex items-center justify-between"
+        >
+          <div>
+            <p className="text-sm font-semibold text-[#22c55e]">Pipeline Complete</p>
+            <p className="text-xs text-[#a1a1aa] mt-1">
+              {session.total_failed_nodes ?? 0} nodes failed &middot; {session.crews_dispatched ?? 0} crews dispatched &middot; {session.alerts_generated ?? 0} alerts sent
+            </p>
+          </div>
+          <button
+            onClick={onViewAnalysis}
+            className="h-11 px-5 rounded-lg bg-[#22c55e] text-white text-sm font-semibold hover:bg-[#16a34a] transition-colors cursor-pointer"
+          >
+            View Impact Analysis &rarr;
+          </button>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  MAIN OVERLAY                                                       */
 /* ================================================================== */
 export default function CascadeOverlay({
@@ -888,8 +1133,9 @@ export default function CascadeOverlay({
   region = "ERCOT",
   scenario = "Winter Storm Uri",
   scenarioKey,
+  session,
 }: CascadeOverlayProps) {
-  const [activeTab, setActiveTab] = useState<"simulation" | "analysis">(
+  const [activeTab, setActiveTab] = useState<"simulation" | "pipeline" | "analysis">(
     "simulation"
   );
 
@@ -908,9 +1154,30 @@ export default function CascadeOverlay({
     return () => window.removeEventListener("keydown", handler);
   }, [isOpen, onClose]);
 
+  // SVG cascade complete → transition to pipeline tab
   const handleSimComplete = useCallback(() => {
-    setActiveTab("analysis");
+    setActiveTab("pipeline");
   }, []);
+
+  // Pipeline complete → auto-transition to analysis after delay
+  const pipelineAutoTransitioned = useRef(false);
+  useEffect(() => {
+    if (activeTab !== "pipeline") {
+      pipelineAutoTransitioned.current = false;
+      return;
+    }
+    if (session?.status === "completed" && !pipelineAutoTransitioned.current) {
+      pipelineAutoTransitioned.current = true;
+      const t = setTimeout(() => setActiveTab("analysis"), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [activeTab, session?.status]);
+
+  const tabs: { key: typeof activeTab; label: string }[] = [
+    { key: "simulation", label: "Cascade Simulation" },
+    { key: "pipeline", label: "Live Pipeline" },
+    { key: "analysis", label: "Impact Analysis" },
+  ];
 
   return (
     <AnimatePresence>
@@ -943,38 +1210,38 @@ export default function CascadeOverlay({
 
             {/* Tabs */}
             <div className="flex items-center gap-3 mb-6 flex-shrink-0">
-              <button
-                onClick={() => setActiveTab("simulation")}
-                className={`h-12 w-[200px] rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-                  activeTab === "simulation"
-                    ? "border-2 border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10"
-                    : "border border-[#3f3f46] text-[#a1a1aa] hover:border-[#71717a]"
-                }`}
-              >
-                Cascade Simulation
-              </button>
-              <button
-                onClick={() => setActiveTab("analysis")}
-                className={`h-12 w-[200px] rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-                  activeTab === "analysis"
-                    ? "border-2 border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10"
-                    : "border border-[#3f3f46] text-[#a1a1aa] hover:border-[#71717a]"
-                }`}
-              >
-                Impact Analysis
-              </button>
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`h-12 w-[200px] rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+                    activeTab === tab.key
+                      ? "border-2 border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10"
+                      : "border border-[#3f3f46] text-[#a1a1aa] hover:border-[#71717a]"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
             {/* Content */}
-            {activeTab === "simulation" ? (
+            {activeTab === "simulation" && (
               <CascadeSimulation
                 onComplete={handleSimComplete}
                 region={region}
                 scenario={scenario}
               />
-            ) : (
+            )}
+            {activeTab === "pipeline" && (
+              <LivePipeline
+                session={session}
+                onViewAnalysis={() => setActiveTab("analysis")}
+              />
+            )}
+            {activeTab === "analysis" && (
               <ImpactAnalysis
-                active={activeTab === "analysis"}
+                active
                 region={region}
                 scenario={scenario}
                 scenarioKey={scenarioKey}

@@ -68,10 +68,14 @@ def _supabase_headers() -> Dict[str, str]:
 
 
 def _fetch_all_rows(table: str, select: str = "*") -> List[Dict[str, Any]]:
-    """Fetch all rows from a Supabase table, paginating as needed."""
+    """Fetch all rows from a Supabase table, paginating as needed.
+
+    Supabase caps responses at 1000 rows regardless of the ``limit``
+    parameter, so we page in chunks of 1000 until we get a short page.
+    """
     url = settings.supabase_url
     headers = _supabase_headers()
-    page_size = 5000
+    page_size = 1000  # Supabase hard caps at 1000
     offset = 0
     all_rows: List[Dict[str, Any]] = []
 
