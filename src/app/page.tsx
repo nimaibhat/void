@@ -778,13 +778,13 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
             <span className="text-[15px] font-semibold tracking-tight text-white">
-              blackout
+              void
             </span>
           </div>
           <div className="flex items-center gap-8">
             {[
               { label: "How it Works", href: "#" },
-              { label: "GitHub", href: "https://github.com/nimaibhat/blackout" },
+              { label: "GitHub", href: "https://github.com/nimaibhat/void" },
             ].map((item) => (
               <a
                 key={item.label}

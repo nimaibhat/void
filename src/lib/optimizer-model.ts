@@ -1,5 +1,5 @@
 /**
- * Blackout Optimizer Model
+ * Void Optimizer Model
  *
  * A feature-based optimization model that mimics ML behavior.
  * Given a set of input features about the grid state and household,

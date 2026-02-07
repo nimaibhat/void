@@ -147,7 +147,7 @@ export default function OperatorEntryModal({ isOpen, onSubmit }: OperatorEntryMo
                 <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
               </div>
               <span className="text-[11px] font-mono text-white/30 ml-2">
-                operator@blackout
+                operator@void
               </span>
             </div>
 

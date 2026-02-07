@@ -59,7 +59,6 @@ const EMPTY_PROFILE: DashboardProfile = {
   location: "",
   zip: "",
   gridRegion: "ERCOT",
-<<<<<<< HEAD
   homeType: "Single Family",
   sqft: 2400,
   devices: [
@@ -78,17 +77,6 @@ const EMPTY_PROFILE: DashboardProfile = {
   estSavings: 14.2,
   enodeUserId: null,
   profileId: null,
-=======
-  homeType: "",
-  sqft: 0,
-  devices: [],
-  threats: [],
-  readinessScore: 0,
-  status: "MONITORING",
-  nextRiskWindow: "",
-  smartActions: 0,
-  estSavings: 0,
->>>>>>> ae9a8ffacf72504130faac7aac629eb6d7d856c4
 };
 
 /* ------------------------------------------------------------------ */
@@ -671,7 +659,10 @@ function DashboardContent() {
   // Realtime live alerts from orchestrated simulations
   const { liveAlerts } = useRealtimeAlerts(profile.gridRegion);
 
-<<<<<<< HEAD
+  // Realtime session — when operator runs a sim, switch scenario
+  const { session: liveSession } = useRealtimeSession();
+  const scenario = liveSession?.scenario ?? "live";
+
   // Derive householdId from profile name
   const deriveHouseholdId = (name: string): string | null => {
     const lower = name.toLowerCase();
@@ -682,13 +673,6 @@ function DashboardContent() {
   };
 
   // Fetch profile from Supabase
-=======
-  // Realtime session — when operator runs a sim, switch scenario
-  const { session: liveSession } = useRealtimeSession();
-  const scenario = liveSession?.scenario ?? "live";
-
-  // Fetch profile from Supabase (always — no hardcoded fallback)
->>>>>>> ae9a8ffacf72504130faac7aac629eb6d7d856c4
   useEffect(() => {
     setLoading(true);
     supabase
@@ -838,7 +822,7 @@ function DashboardContent() {
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
               <span className="text-[15px] font-semibold tracking-tight text-white">
-                blackout
+                void
               </span>
             </div>
           </div>

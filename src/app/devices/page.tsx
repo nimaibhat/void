@@ -382,7 +382,7 @@ export default function DevicesPage() {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
           <a href="/" className="text-[15px] font-semibold tracking-tight text-white hover:text-[#22c55e] transition-colors">
-            blackout
+            void
           </a>
           <span className="text-white/20 mx-2">/</span>
           <span className="text-[13px] font-mono text-white/50">device sandbox</span>

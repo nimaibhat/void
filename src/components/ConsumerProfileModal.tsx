@@ -348,7 +348,7 @@ export default function ConsumerProfileModal({
                 <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
               </div>
-              <span className="text-[11px] font-mono text-white/30 ml-2">citizen@blackout</span>
+              <span className="text-[11px] font-mono text-white/30 ml-2">citizen@void</span>
               <button
                 onClick={onClose}
                 className="ml-auto text-white/20 hover:text-white/60 transition-colors cursor-pointer"

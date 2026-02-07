@@ -101,7 +101,7 @@ function RespondContent() {
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="w-3 h-3 rounded-full bg-[#22c55e] shadow-[0_0_12px_rgba(34,197,94,0.6)]" />
           <span className="text-[18px] font-semibold tracking-tight">
-            blackout
+            void
           </span>
         </div>
 
