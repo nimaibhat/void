@@ -1,0 +1,18 @@
+{
+  "grid_utilization_pct": 0.650453,
+  "demand_estimate_mw": 0.178347,
+  "heating_degree_hours": 0.054983,
+  "cooling_degree_hours": 0.028069,
+  "rolling_24h_avg_price": 0.025838,
+  "hour_of_day": 0.016191,
+  "temperature_f": 0.014463,
+  "temp_change_6h": 0.007284,
+  "is_extreme_heat": 0.005111,
+  "month": 0.003357,
+  "day_of_week": 0.003146,
+  "is_weekend": 0.003041,
+  "rolling_24h_avg_temp": 0.002894,
+  "renewable_gen_pct": 0.002426,
+  "wind_speed_mph": 0.002407,
+  "is_extreme_cold": 0.001991
+}

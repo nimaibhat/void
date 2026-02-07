@@ -1,0 +1,33 @@
+{
+  "training_date": "2026-02-07T09:51:57.711356+00:00",
+  "n_samples": 43818,
+  "n_features": 16,
+  "feature_names": [
+    "temperature_f",
+    "wind_speed_mph",
+    "hour_of_day",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "heating_degree_hours",
+    "cooling_degree_hours",
+    "demand_estimate_mw",
+    "renewable_gen_pct",
+    "grid_utilization_pct",
+    "rolling_24h_avg_price",
+    "rolling_24h_avg_temp",
+    "temp_change_6h",
+    "is_extreme_cold",
+    "is_extreme_heat"
+  ],
+  "cv_r2_score": 0.777631,
+  "cv_mae": 6.61,
+  "cv_rmse": 29.46,
+  "full_r2_score": 0.996484,
+  "data_source": "supabase_ercot",
+  "date_range": "2021-01-01 to 2026-01-01",
+  "normal_r2": 0.994308,
+  "normal_mae": 2.59,
+  "extreme_r2": 0.999532,
+  "extreme_mae": 5.61
+}

@@ -22,6 +22,7 @@ export interface AlertData {
 
 interface AlertsPanelProps {
   alerts?: AlertData[];
+  onAction?: (alertId: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -137,9 +138,11 @@ function filterAlerts(alerts: AlertData[], filter: FilterKey): AlertData[] {
 function AlertCard({
   alert,
   index,
+  onAction,
 }: {
   alert: AlertData;
   index: number;
+  onAction?: (alertId: string) => void;
 }) {
   const config = SEVERITY_CONFIG[alert.severity];
 
@@ -173,11 +176,17 @@ function AlertCard({
       {alert.action ? (
         <div className="flex justify-end">
           {alert.action.variant === "primary" ? (
-            <button className="h-10 px-4 rounded-lg bg-[#22c55e] text-white text-sm font-medium hover:bg-[#16a34a] transition-colors cursor-pointer">
+            <button
+              onClick={() => onAction?.(alert.id)}
+              className="h-10 px-4 rounded-lg bg-[#22c55e] text-white text-sm font-medium hover:bg-[#16a34a] transition-colors cursor-pointer"
+            >
               {alert.action.label}
             </button>
           ) : (
-            <button className="h-10 px-4 rounded-lg border border-[#3f3f46] text-[#d4d4d8] text-sm font-medium hover:bg-[#1a1a1a] hover:border-[#52525b] transition-colors cursor-pointer">
+            <button
+              onClick={() => onAction?.(alert.id)}
+              className="h-10 px-4 rounded-lg border border-[#3f3f46] text-[#d4d4d8] text-sm font-medium hover:bg-[#1a1a1a] hover:border-[#52525b] transition-colors cursor-pointer"
+            >
               {alert.action.label}
             </button>
           )}
@@ -194,7 +203,7 @@ function AlertCard({
 /* ------------------------------------------------------------------ */
 /*  AlertsPanel                                                        */
 /* ------------------------------------------------------------------ */
-export default function AlertsPanel({ alerts = DEFAULT_ALERTS }: AlertsPanelProps) {
+export default function AlertsPanel({ alerts = DEFAULT_ALERTS, onAction }: AlertsPanelProps) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const filtered = filterAlerts(alerts, activeFilter);
 
@@ -231,7 +240,7 @@ export default function AlertsPanel({ alerts = DEFAULT_ALERTS }: AlertsPanelProp
         <AnimatePresence mode="popLayout">
           {filtered.length > 0 ? (
             filtered.map((alert, i) => (
-              <AlertCard key={alert.id} alert={alert} index={i} />
+              <AlertCard key={alert.id} alert={alert} index={i} onAction={onAction} />
             ))
           ) : (
             <motion.div
