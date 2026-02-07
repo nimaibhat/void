@@ -46,9 +46,11 @@ function formatTime(hour: number): string {
 export default function PriceForecastChart({
   prices,
   loading,
+  zone,
 }: {
   prices: HourlyPrice[];
   loading: boolean;
+  zone?: string;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -217,7 +219,7 @@ export default function PriceForecastChart({
             48-Hour Price Forecast
           </h3>
           <p className="text-xs text-[#52525b] mt-0.5">
-            ML + weather model prediction
+            ML + weather model prediction{zone ? ` \u00b7 ${zone} zone` : ""}
           </p>
         </div>
         <div className="flex items-center gap-5 text-xs font-mono">

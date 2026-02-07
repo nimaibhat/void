@@ -15,11 +15,13 @@ import json as _json
 import logging
 import math
 import pickle
+import time as _time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import requests
 
 from app.models.price import HourlyPrice, PricingMode
 from app.services.demand_service import TOD_CURVE
@@ -80,6 +82,39 @@ NORMAL_WIND_MPH: Dict[int, float] = {
 # ── ERCOT grid capacity (MW) ─────────────────────────────────────────
 
 ERCOT_CAPACITY_MW = 85_000
+
+# ── Zone-level structural price multipliers ──────────────────────────
+# Reflects transmission congestion, local generation mix, and demand density.
+# ~25% spread between cheapest (Far West wind-rich) and most expensive (North Central demand-heavy).
+
+ZONE_PRICE_FACTORS: Dict[str, float] = {
+    "Far West": 0.85,
+    "West": 0.90,
+    "Coast": 0.92,
+    "Southern": 0.95,
+    "East": 0.97,
+    "North": 1.00,
+    "South Central": 1.05,
+    "North Central": 1.08,
+}
+
+# ── Zone lat/lon for weather lookups ─────────────────────────────────
+
+ZONE_COORDS: Dict[str, Tuple[float, float]] = {
+    "Coast": (29.76, -95.37),
+    "East": (31.33, -94.73),
+    "Far West": (31.99, -102.08),
+    "North": (33.20, -97.13),
+    "North Central": (32.78, -96.80),
+    "South Central": (30.27, -97.74),
+    "Southern": (27.80, -97.40),
+    "West": (31.44, -100.45),
+}
+
+# ── Simple in-memory weather cache (zone → (timestamp, data)) ────────
+
+_weather_cache: Dict[str, Tuple[float, List[Dict[str, float]]]] = {}
+_WEATHER_CACHE_TTL = 900  # 15 minutes
 
 # ── URI scenario profiles (48 hours) ─────────────────────────────────
 
@@ -416,6 +451,104 @@ class PriceService:
             ))
 
         return prices
+
+    # ── Zone-adjusted forecast ─────────────────────────────────────
+
+    def get_zone_price_forecast(
+        self,
+        region: str,
+        zone: str,
+        mode: PricingMode,
+        scenario: str = "normal",
+        hours: int = 48,
+    ) -> List[HourlyPrice]:
+        """Generate zone-adjusted price forecast.
+
+        1. Compute base regional forecast.
+        2. Apply structural zone multiplier.
+        3. For live scenario, fetch zone weather and apply temp/wind adjustments.
+        """
+        base_prices = self.get_price_forecast(region, mode, scenario, hours)
+        factor = ZONE_PRICE_FACTORS.get(zone, 1.0)
+
+        # For live scenario, try to get zone-specific weather adjustments
+        weather_adjustments: Optional[List[Dict[str, float]]] = None
+        if scenario == "live" and zone in ZONE_COORDS:
+            weather_adjustments = self._fetch_zone_weather(zone, hours)
+
+        adjusted: List[HourlyPrice] = []
+        for i, hp in enumerate(base_prices):
+            price_mwh = hp.price_mwh * factor
+            # Apply weather-based adjustments for live scenario
+            if weather_adjustments and i < len(weather_adjustments):
+                w = weather_adjustments[i]
+                # Temperature stress: cold (<32F) or hot (>95F) pushes prices up
+                temp_f = w.get("temp_f", 65.0)
+                if temp_f < 32:
+                    temp_stress = 1.0 + (32 - temp_f) * 0.005  # up to ~16% for 0F
+                elif temp_f > 95:
+                    temp_stress = 1.0 + (temp_f - 95) * 0.004
+                else:
+                    temp_stress = 1.0
+                # Wind discount: more wind → cheaper power (especially in wind-rich zones)
+                wind_mph = w.get("wind_mph", 10.0)
+                wind_discount = max(0.90, 1.0 - (wind_mph / 40.0) * 0.15)
+                price_mwh = price_mwh * temp_stress * wind_discount
+
+            consumer_kwh = round(max(0.0, price_mwh / 1000.0 * 2.2 + 0.04), 4)
+
+            adjusted.append(HourlyPrice(
+                hour=hp.hour,
+                timestamp=hp.timestamp,
+                price_mwh=round(price_mwh, 2),
+                consumer_price_kwh=consumer_kwh,
+                demand_factor=hp.demand_factor,
+                wind_gen_factor=hp.wind_gen_factor,
+                grid_utilization_pct=hp.grid_utilization_pct,
+                zone=zone,
+                prediction_mode=hp.prediction_mode,
+            ))
+
+        return adjusted
+
+    def _fetch_zone_weather(
+        self, zone: str, hours: int
+    ) -> Optional[List[Dict[str, float]]]:
+        """Fetch hourly weather for a zone from Open-Meteo, with 15-min cache."""
+        now = _time.time()
+        if zone in _weather_cache:
+            ts, data = _weather_cache[zone]
+            if now - ts < _WEATHER_CACHE_TTL:
+                return data[:hours]
+
+        lat, lon = ZONE_COORDS[zone]
+        try:
+            resp = requests.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "hourly": "temperature_2m,wind_speed_10m",
+                    "temperature_unit": "fahrenheit",
+                    "wind_speed_unit": "mph",
+                    "forecast_days": 3,
+                },
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            hourly = data.get("hourly", {})
+            temps = hourly.get("temperature_2m", [])
+            winds = hourly.get("wind_speed_10m", [])
+            result = [
+                {"temp_f": t, "wind_mph": w}
+                for t, w in zip(temps, winds)
+            ]
+            _weather_cache[zone] = (now, result)
+            return result[:hours]
+        except Exception as e:
+            logger.warning("Failed to fetch zone weather for %s: %s", zone, e)
+            return None
 
     # ── Model info ────────────────────────────────────────────────
 
