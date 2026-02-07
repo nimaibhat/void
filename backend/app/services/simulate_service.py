@@ -1,89 +1,59 @@
-import uuid
-from datetime import datetime, timezone
+"""Simulate Service — chains weather → demand → cascade for the
+POST /api/simulate/cascade endpoint.
+"""
 
-from app.models.simulate import (
-    CascadeEvent,
-    CascadeScenario,
-    CascadeSimulationResponse,
-)
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict
+
+from app.services import demand_service
+from app.services.cascade_service import run_cascade
+from app.services.grid_graph_service import grid_graph
+from app.services.weather_service import weather_service
+
+logger = logging.getLogger("blackout.simulate_service")
 
 
 async def run_cascade_simulation(
-    scenario: CascadeScenario,
-) -> CascadeSimulationResponse:
-    """Run a cascade failure simulation for the given scenario.
+    start_time_str: str,
+    forecast_hour: int,
+    region: str,
+) -> Dict[str, Any]:
+    """Full pipeline: fetch weather → compute demand → run cascade.
 
-    This should execute a grid cascade model that simulates how an initial
-    trigger event (heatwave, equipment failure, etc.) propagates through
-    the interconnected power grid, causing secondary failures, load
-    shedding, and customer outages.
-
-    Args:
-        scenario: The CascadeScenario defining trigger, region, severity, etc.
-
-    Returns:
-        CascadeSimulationResponse with timeline of cascade events and metrics.
+    Parameters
+    ----------
+    start_time_str : str
+        ISO datetime for the weather scenario (e.g. "2021-02-13T00:00:00").
+    forecast_hour : int
+        Hour offset into the forecast (0-48).
+    region : str
+        ISO region (currently only ERCOT has real grid data).
     """
-    # TODO: Implement actual cascade simulation engine here
-    now = datetime.now(timezone.utc)
-    cascade_events = [
-        CascadeEvent(
-            hour=0,
-            event=f"Initial {scenario.trigger.value} trigger in {scenario.region}",
-            affected_region=scenario.region,
-            load_shed_mw=0.0,
-            customers_affected=0,
-        ),
-        CascadeEvent(
-            hour=2,
-            event="Generator trip due to thermal limits",
-            affected_region=scenario.region,
-            load_shed_mw=500.0,
-            customers_affected=45000,
-        ),
-        CascadeEvent(
-            hour=4,
-            event="Transmission line overload — automatic relay trip",
-            affected_region=scenario.region,
-            load_shed_mw=1200.0,
-            customers_affected=130000,
-        ),
-        CascadeEvent(
-            hour=6,
-            event="Rolling blackouts initiated by operator",
-            affected_region=scenario.region,
-            load_shed_mw=3000.0,
-            customers_affected=450000,
-        ),
-        CascadeEvent(
-            hour=12,
-            event="Peak load shed — maximum cascade extent",
-            affected_region=scenario.region,
-            load_shed_mw=5000.0 * scenario.severity,
-            customers_affected=int(800000 * scenario.severity),
-        ),
-    ]
+    # 1. Fetch city temperatures from the weather service.
+    city_forecasts = None
+    if weather_service.model_loaded:
+        try:
+            dt = datetime.fromisoformat(start_time_str).replace(tzinfo=timezone.utc)
+            city_forecasts = await weather_service.get_city_forecasts(dt)
+        except Exception as exc:
+            logger.warning("Weather fetch failed, using fallback temps: %s", exc)
 
-    if scenario.include_secondary_effects:
-        cascade_events.append(
-            CascadeEvent(
-                hour=8,
-                event="Water treatment plant backup power activated",
-                affected_region=scenario.region,
-                load_shed_mw=150.0,
-                customers_affected=0,
-            )
-        )
+    city_temps = demand_service.get_city_temps_for_hour(city_forecasts, forecast_hour)
 
-    cascade_events.sort(key=lambda e: e.hour)
-
-    return CascadeSimulationResponse(
-        simulation_id=str(uuid.uuid4()),
-        scenario=scenario,
-        started_at=now,
-        completed_at=now,
-        total_load_shed_mw=sum(e.load_shed_mw for e in cascade_events),
-        peak_customers_affected=max(e.customers_affected for e in cascade_events),
-        cascade_events=cascade_events,
-        risk_score=round(scenario.severity * 8.5, 1),
+    # 2. Compute demand multipliers for every grid node.
+    multipliers = demand_service.compute_demand_multipliers(
+        city_temps, forecast_hour, region=region
     )
+
+    # 3. Run the cascade simulation on a deep copy of the grid.
+    result = run_cascade(
+        graph=grid_graph.graph,
+        demand_multipliers=multipliers,
+        scenario_label=f"{region.lower()}_{start_time_str[:10].replace('-', '')}",
+        forecast_hour=forecast_hour,
+    )
+
+    return result

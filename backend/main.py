@@ -6,17 +6,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import consumer, forecast, grid, simulate, utility
+from app.routers import consumer, forecast, grid, simulate, utility, weather
 from app.schemas.responses import ErrorResponse
+from app.services.grid_graph_service import grid_graph
+from app.services.price_service import price_service
+from app.services.weather_service import weather_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initialize connections, caches, etc.
-    # TODO: Add startup logic (DB connections, model loading, etc.)
+    # Startup: load grid graph, SFNO weather model, XGBoost price model.
+    grid_graph.load()
+    await weather_service.load_model()
+    await price_service.load_model()
     yield
-    # Shutdown: clean up resources
-    # TODO: Add shutdown logic (close connections, flush buffers, etc.)
+    # Shutdown: nothing to clean up — model memory freed automatically.
 
 
 app = FastAPI(
@@ -34,6 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(weather.router)
 app.include_router(forecast.router)
 app.include_router(grid.router)
 app.include_router(simulate.router)

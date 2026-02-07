@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # ISO / grid data providers
     iso_api_key: str = ""
 
+    # SFNO weather model
+    weather_cache_dir: str = "./cache/weather"
+
     # Next.js mock data APIs (historical demand, wholesale prices)
     # When set, backend can proxy to these instead of real EIA/ERCOT/CAISO/PJM.
     next_mock_api_base: str = "http://localhost:3000"

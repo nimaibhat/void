@@ -37,6 +37,13 @@ yarn-error.log*
 # CDS API credentials
 .cdsapirc
 
+# weather forecast cache
+/backend/cache/
+
+# python
+__pycache__/
+*.pyc
+
 # vercel
 .vercel
 
