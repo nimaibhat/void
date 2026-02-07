@@ -159,13 +159,25 @@ export interface GridNodeData {
   capacity_mw: number;
   voltage_kv: number;
   weather_zone: string;
+  source?: "activsg" | "travis";
 }
 
-export async function fetchGridNodes(): Promise<GridNodeData[]> {
+export interface GridEdgeData {
+  fromLat: number;
+  fromLon: number;
+  toLat: number;
+  toLon: number;
+  source: "activsg" | "travis";
+  capacity_mva: number;
+}
+
+export async function fetchGridNodes(): Promise<{ nodes: GridNodeData[]; edges: GridEdgeData[] }> {
   const res = await fetch("/api/grid-nodes");
   if (!res.ok) throw new Error(`Grid nodes ${res.status}`);
   const json = await res.json();
-  return json.data;
+  const nodes = Array.isArray(json.data) ? json.data : [];
+  const edges = Array.isArray(json.edges) ? json.edges : [];
+  return { nodes, edges };
 }
 
 /* ================================================================== */
