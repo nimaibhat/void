@@ -90,6 +90,12 @@ const STATUS_COLORS: Record<string, string> = {
   nominal: "#22c55e",
 };
 
+const AUSTIN_IDS = new Set([
+  "austin", "sand-hill", "decker-creek", "lost-pines", "sam-gideon",
+  "marshall-ford", "bastrop-energy", "mueller-energy", "webberville-solar",
+  "austin-power", "central-utility",
+]);
+
 /* ================================================================== */
 /*  HELPERS                                                            */
 /* ================================================================== */
@@ -178,6 +184,7 @@ export default function OperatorGlobe({
         cascade: h.cascade,
         color: STATUS_COLORS[h.status],
         radius: h.status === "critical" ? 8 : h.status === "stressed" ? 6 : 4,
+        isAustin: AUSTIN_IDS.has(h.id),
       },
       geometry: { type: "Point", coordinates: [h.lng, h.lat] },
     })),
@@ -276,6 +283,27 @@ export default function OperatorGlobe({
             "circle-stroke-color": ["get", "color"],
             "circle-stroke-width": 1.5,
             "circle-stroke-opacity": 0.4,
+          },
+        });
+
+        /* --- Austin labels (red) --- */
+        map.addLayer({
+          id: "austin-labels",
+          type: "symbol",
+          source: "hotspots",
+          filter: ["==", ["get", "isAustin"], true],
+          layout: {
+            "text-field": ["get", "city"],
+            "text-size": 11,
+            "text-offset": [0, 1.4],
+            "text-anchor": "top",
+            "text-allow-overlap": false,
+            "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+          },
+          paint: {
+            "text-color": "#ef4444",
+            "text-halo-color": "rgba(0,0,0,0.8)",
+            "text-halo-width": 1.5,
           },
         });
 
