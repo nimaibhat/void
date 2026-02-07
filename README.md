@@ -1,5 +1,22 @@
 # void
 
+void is a full-stack grid intelligence platform that forecasts electricity prices, simulates cascade failures across the Texas power grid, dispatches repair crews, and gives consumers real-time alerts to shift their energy usage. It combines a 2,173-node synthetic grid model with historical ERCOT load data, live weather from Open-Meteo, and an XGBoost price prediction model trained on 43,818 hourly records.
+
+Built for the scenario where Winter Storm Uri hits again and the grid needs to respond in real time.
+
+## Table of Contents
+
+- [Hackathon Tracks](#hackathon-tracks)
+- [Architecture](#architecture)
+- [Pages](#pages)
+- [Tech Stack](#tech-stack)
+- [External APIs and Data Sources](#external-apis-and-data-sources)
+- [ML Models](#ml-models)
+- [Database Schema](#database-schema)
+- [Setup](#setup)
+- [Environment Variables](#environment-variables)
+- [API Reference](#api-reference)
+
 ## Hackathon Tracks
 
 ### Best Financial Hack (Capital One)
@@ -10,24 +27,6 @@ In the CodeRabbit tech talk we learned that you could customize the tone of code
 
 ### Best Use of XRPL (Build an MVP that leverages the XRP Ledger's core features)
 When a consumer follows a price alert and shifts their energy usage, the savings are real but small, often a few dollars. void uses the XRP Ledger to pay those savings out as RLUSD stablecoin directly to the household's wallet. The system creates Testnet wallets, sets up RLUSD trustlines, and sends micropayouts automatically when accumulated savings cross a threshold. XRPL's near-zero transaction fees make sub-dollar energy rebates actually viable, which is something traditional payment rails can't do without eating the entire payout in processing fees.
-
----
-
-void is a full-stack grid intelligence platform that forecasts electricity prices, simulates cascade failures across the Texas power grid, dispatches repair crews, and gives consumers real-time alerts to shift their energy usage. It combines a 2,173-node synthetic grid model with historical ERCOT load data, live weather from Open-Meteo, and an XGBoost price prediction model trained on 43,818 hourly records.
-
-Built for the scenario where Winter Storm Uri hits again and the grid needs to respond in real time.
-
-## Table of Contents
-
-- [Architecture](#architecture)
-- [Pages](#pages)
-- [Tech Stack](#tech-stack)
-- [External APIs and Data Sources](#external-apis-and-data-sources)
-- [ML Models](#ml-models)
-- [Database Schema](#database-schema)
-- [Setup](#setup)
-- [Environment Variables](#environment-variables)
-- [API Reference](#api-reference)
 
 ## Architecture
 
