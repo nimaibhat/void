@@ -151,9 +151,10 @@ export interface HourlyPrice {
   grid_utilization_pct: number;
 }
 
-export async function fetchPrices(region: string, scenario: string): Promise<HourlyPrice[]> {
+export async function fetchPrices(region: string, scenario: string, mode?: string): Promise<HourlyPrice[]> {
+  const modeParam = mode ? `&mode=${mode}` : "";
   const res = await get<{ data: { prices: HourlyPrice[] } }>(
-    `/forecast/prices/${region}?scenario=${scenario}`
+    `/forecast/prices/${region}?scenario=${scenario}${modeParam}`
   );
   return res.data.prices;
 }

@@ -339,6 +339,207 @@ def download_ercot_data(years: int) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  SUPABASE + OPEN-METEO DATA (real ERCOT demand + real weather)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def download_supabase_data() -> pd.DataFrame:
+    """Pull real hourly demand from Supabase ercot_load + real weather from Open-Meteo.
+
+    Joins on timestamp to create rich feature vectors.  Generates calibrated
+    wholesale prices using the rules engine (since we don't have real ERCOT SPP
+    data) but with real demand + weather inputs for realistic patterns.
+
+    Supabase ercot_load table: 43,818 rows, 8 zones, 2021-2025.
+    """
+    t0 = time.time()
+    print("[1/5] Downloading real ERCOT demand + weather data...")
+
+    try:
+        import requests
+    except ImportError:
+        print("ERROR: 'requests' package required for supabase mode.")
+        print("Install with:  pip install requests")
+        sys.exit(1)
+
+    # ── Load Supabase credentials from .env ──
+    import os
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "").strip()
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY", "").strip()
+
+    # Try reading from .env file
+    env_vars: Dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if "=" not in line or line.startswith("#"):
+                continue
+            k, v = line.split("=", 1)
+            env_vars[k.strip()] = v.strip()
+
+    if not supabase_url:
+        supabase_url = env_vars.get("NEXT_PUBLIC_SUPABASE_URL", "")
+    if not supabase_key:
+        # Prefer anon key for REST API; fall back to publishable key
+        supabase_key = (
+            env_vars.get("SUPABASE_ANON_KEY", "")
+            or env_vars.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY", "")
+        )
+
+    if not supabase_url or not supabase_key:
+        print("ERROR: Missing Supabase credentials.")
+        print("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY)")
+        print(f"in environment or in {env_path}")
+        sys.exit(1)
+
+    supabase_url = supabase_url.rstrip("/")
+
+    # ── Fetch all ercot_load rows via REST (paginated, 1000 per page) ──
+    print("  Fetching ERCOT demand from Supabase...")
+    all_rows: List[Dict] = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        url = (
+            f"{supabase_url}/rest/v1/ercot_load"
+            f"?select=timestamp,ercot_total,coast,east,far_west,north,north_central,south,south_central,west"
+            f"&order=timestamp.asc"
+            f"&limit={page_size}&offset={offset}"
+        )
+        resp = requests.get(url, headers={
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+        }, timeout=60)
+        if not resp.ok:
+            print(f"ERROR: Supabase returned {resp.status_code}: {resp.text[:200]}")
+            sys.exit(1)
+        rows = resp.json()
+        if not rows:
+            break
+        all_rows.extend(rows)
+        offset += page_size
+        if len(rows) < page_size:
+            break
+
+    if not all_rows:
+        print("ERROR: No rows returned from ercot_load table.")
+        sys.exit(1)
+
+    print(f"    Fetched {len(all_rows):,} ERCOT demand rows")
+
+    demand_df = pd.DataFrame(all_rows)
+    demand_df["timestamp"] = pd.to_datetime(demand_df["timestamp"], utc=True)
+    demand_df["ercot_total"] = pd.to_numeric(demand_df["ercot_total"], errors="coerce")
+    demand_df = demand_df.sort_values("timestamp").reset_index(drop=True)
+
+    start_date = demand_df["timestamp"].min().strftime("%Y-%m-%d")
+    end_date = demand_df["timestamp"].max().strftime("%Y-%m-%d")
+    print(f"    Date range: {start_date} to {end_date}")
+
+    # ── Weather from Open-Meteo (real historical, free) ──
+    print("  Downloading weather data from Open-Meteo...")
+    all_weather: List[pd.DataFrame] = []
+
+    for city_name, (lat, lon) in CITIES.items():
+        url = (
+            f"https://archive-api.open-meteo.com/v1/archive"
+            f"?latitude={lat}&longitude={lon}"
+            f"&start_date={start_date}&end_date={end_date}"
+            f"&hourly=temperature_2m,wind_speed_10m"
+            f"&temperature_unit=fahrenheit"
+            f"&wind_speed_unit=mph"
+            f"&timezone=UTC"
+        )
+        try:
+            resp = requests.get(url, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"ERROR: Failed to download weather for {city_name}: {e}")
+            sys.exit(1)
+
+        hourly = data.get("hourly", {})
+        if not hourly.get("time"):
+            print(f"ERROR: No hourly data returned for {city_name}.")
+            sys.exit(1)
+
+        wdf = pd.DataFrame({
+            "timestamp": pd.to_datetime(hourly["time"], utc=True),
+            f"temp_{city_name.lower()}": hourly["temperature_2m"],
+            f"wind_{city_name.lower()}": hourly["wind_speed_10m"],
+        })
+        all_weather.append(wdf)
+        print(f"    {city_name}: {len(wdf):,} hours downloaded")
+
+    # Merge city weather
+    weather = all_weather[0]
+    for wdf in all_weather[1:]:
+        weather = weather.merge(wdf, on="timestamp", how="outer")
+
+    # Average across cities
+    temp_cols = [c for c in weather.columns if c.startswith("temp_")]
+    wind_cols = [c for c in weather.columns if c.startswith("wind_")]
+    weather["temperature_f"] = weather[temp_cols].mean(axis=1)
+    weather["wind_speed_mph"] = weather[wind_cols].mean(axis=1)
+
+    # ── Join demand + weather on timestamp ──
+    print("  Joining demand + weather...")
+    merged = demand_df.merge(weather[["timestamp", "temperature_f", "wind_speed_mph"]],
+                              on="timestamp", how="inner")
+    merged = merged.sort_values("timestamp").reset_index(drop=True)
+    print(f"    Joined: {len(merged):,} rows")
+
+    # ── Generate prices using rules engine with REAL demand + weather ──
+    print("  Generating calibrated prices from real demand + weather...")
+
+    h_of_day = merged["timestamp"].dt.hour
+    tod = h_of_day.map(TOD_PREMIUM).fillna(1.0)
+
+    temp = merged["temperature_f"].values
+    wind = merged["wind_speed_mph"].values
+    demand_mw = merged["ercot_total"].astype(float).values
+
+    hdh = np.maximum(0.0, 65.0 - temp)
+    cdh = np.maximum(0.0, temp - 75.0)
+    temp_premium = hdh * 2.5 + cdh * 1.8
+    wind_dep = np.maximum(0.3, 1.0 - wind * 0.015)
+
+    price = (ERCOT_BASE_PRICE_MWH + temp_premium) * tod.values * wind_dep
+
+    # Use REAL demand for grid utilization → scarcity pricing
+    grid_util = np.minimum(1.0, demand_mw / ERCOT_CAPACITY_MW)
+    scarcity = np.where(grid_util > 0.80, (grid_util - 0.80) ** 2 * 5000, 0.0)
+    scarcity = scarcity + np.where(
+        grid_util > 0.95, (grid_util - 0.95) * 20000, 0.0
+    )
+    price = price + scarcity
+
+    # Stochastic noise calibrated to ERCOT volatility
+    rng = np.random.default_rng(42)
+    price = price * (1.0 + rng.normal(0, 0.08, len(price)))
+    price = np.maximum(-15.0, price)
+
+    df = pd.DataFrame({
+        "timestamp": merged["timestamp"],
+        "temperature_f": merged["temperature_f"].round(1),
+        "wind_speed_mph": merged["wind_speed_mph"].round(1),
+        "price_mwh": np.round(price, 2),
+        "demand_mw": demand_mw.round(0),
+    })
+    df = df.dropna().reset_index(drop=True)
+
+    elapsed = time.time() - t0
+    print(f"    Dataset: {len(df):,} rows in {elapsed:.1f}s")
+    print(f"    Temp range: {df['temperature_f'].min():.0f}°F to {df['temperature_f'].max():.0f}°F")
+    print(f"    Price range: ${df['price_mwh'].min():.2f} to ${df['price_mwh'].max():.2f}/MWh")
+    print(f"    Demand range: {df['demand_mw'].min():.0f} to {df['demand_mw'].max():.0f} MW")
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  FEATURE ENGINEERING
 # ══════════════════════════════════════════════════════════════════════
 
@@ -361,12 +562,15 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df["heating_degree_hours"] = np.maximum(0.0, 65.0 - df["temperature_f"])
     df["cooling_degree_hours"] = np.maximum(0.0, df["temperature_f"] - 75.0)
 
-    # ── Demand estimate (MW) ──
-    tod = df["hour_of_day"].map(TOD_PREMIUM).fillna(1.0)
-    base_demand = ERCOT_CAPACITY_MW * 0.45
-    heat_load = df["heating_degree_hours"] * 400
-    cool_load = df["cooling_degree_hours"] * 350
-    df["demand_estimate_mw"] = ((base_demand + heat_load + cool_load) * tod).round(0)
+    # ── Demand estimate (MW) — use real demand if available ──
+    if "demand_mw" in df.columns:
+        df["demand_estimate_mw"] = df["demand_mw"].round(0)
+    else:
+        tod = df["hour_of_day"].map(TOD_PREMIUM).fillna(1.0)
+        base_demand = ERCOT_CAPACITY_MW * 0.45
+        heat_load = df["heating_degree_hours"] * 400
+        cool_load = df["cooling_degree_hours"] * 350
+        df["demand_estimate_mw"] = ((base_demand + heat_load + cool_load) * tod).round(0)
 
     # ── Renewable generation % ──
     wind_cf = np.minimum(1.0, df["wind_speed_mph"] / 25.0)
@@ -550,7 +754,11 @@ def train_and_evaluate(
         "cv_mae": round(avg_mae, 2),
         "cv_rmse": round(avg_rmse, 2),
         "full_r2_score": round(full_r2, 6),
-        "data_source": "ercot_historical" if data_source == "ercot" else "synthetic",
+        "data_source": (
+            "supabase_ercot" if data_source == "supabase"
+            else "ercot_historical" if data_source == "ercot"
+            else "synthetic"
+        ),
         "date_range": date_range,
         "normal_r2": round(normal_r2, 6),
         "normal_mae": round(normal_mae, 2),
@@ -710,14 +918,15 @@ def main() -> None:
             "examples:\n"
             "  python scripts/train_price_model.py --data-source synthetic\n"
             "  python scripts/train_price_model.py --data-source ercot --years 2\n"
+            "  python scripts/train_price_model.py --data-source supabase\n"
             "  python scripts/train_price_model.py --output-dir backend/models\n"
         ),
     )
     parser.add_argument(
         "--data-source",
-        choices=["synthetic", "ercot"],
+        choices=["synthetic", "ercot", "supabase"],
         default="synthetic",
-        help="'synthetic' (fast, default) or 'ercot' (downloads real weather)",
+        help="'synthetic' (fast), 'ercot' (real weather), or 'supabase' (real ERCOT demand + weather)",
     )
     parser.add_argument(
         "--output-dir",
@@ -746,6 +955,8 @@ def main() -> None:
     # Step 1: Raw data
     if args.data_source == "synthetic":
         df = generate_synthetic_data()
+    elif args.data_source == "supabase":
+        df = download_supabase_data()
     else:
         df = download_ercot_data(years=args.years)
 

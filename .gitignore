@@ -47,6 +47,9 @@ yarn-error.log*
 __pycache__/
 *.pyc
 
+# ML model binaries (stored in Supabase Storage)
+*.pkl
+
 # vercel
 .vercel
 
