@@ -11,6 +11,31 @@
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
+/* ---- XRPL savings tracking ---- */
+export interface SavingSession {
+  id: string;
+  eventType: EventType;
+  startTime: number;             // Date.now()
+  durationHours: number;         // assumed event window
+  rateUSDPerHour: number;        // savings rate for this event
+  degreeDelta: number;           // how many °C the user adjusted
+  savingsUSD: number;            // rate × duration × delta (computed on creation)
+}
+
+export interface XrplWallet {
+  address: string;
+  seed: string;
+  trustLineCreated: boolean;
+}
+
+export interface PayoutRecord {
+  id: string;
+  amount: string;                // USD value sent as RLUSD
+  txHash: string;
+  timestamp: string;
+  triggerSavings: number;        // what savingsPending was before payout
+}
+
 export interface Household {
   id: string;
   name: string;
@@ -24,6 +49,16 @@ export interface Household {
   };
   credits: number;
   totalParticipations: number;
+  /** XRPL wallet linked to this household (null = not yet set up) */
+  xrplWallet: XrplWallet | null;
+  /** Accumulated savings not yet paid out (USD) */
+  savingsUSD_pending: number;
+  /** Total savings already paid out on XRPL (USD) */
+  savingsUSD_paid: number;
+  /** History of saving sessions (one per accepted recommendation) */
+  savingSessions: SavingSession[];
+  /** History of XRPL payouts */
+  payouts: PayoutRecord[];
 }
 
 export type EventType =
@@ -52,10 +87,13 @@ export interface GridEvent {
 export interface Recommendation {
   id: string;
   eventId: string;
+  eventType: EventType;
   householdId: string;
   currentSetpoint: number;
   recommendedSetpoint: number;
   estimatedCredits: number;
+  /** Estimated USD savings for this event (time × rate × delta) */
+  estimatedSavingsUSD: number;
   reason: string;
   status: "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
   respondedAt: string | null;
@@ -70,7 +108,7 @@ export interface SimulationState {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Default households (just Martinez — the one real HVAC user)        */
+/*  Default households                                                  */
 /* ------------------------------------------------------------------ */
 const DEFAULT_HOUSEHOLDS: Household[] = [
   {
@@ -82,6 +120,41 @@ const DEFAULT_HOUSEHOLDS: Household[] = [
     hvac: { currentTemp: 22, setpoint: 22, mode: "HEAT" },
     credits: 0,
     totalParticipations: 0,
+    xrplWallet: null,
+    savingsUSD_pending: 0,
+    savingsUSD_paid: 0,
+    savingSessions: [],
+    payouts: [],
+  },
+  {
+    id: "hh-chen",
+    name: "Chen",
+    enodeUserId: null,
+    enodeHvacId: null,
+    isReal: false,
+    hvac: { currentTemp: 21, setpoint: 21, mode: "HEAT" },
+    credits: 0,
+    totalParticipations: 0,
+    xrplWallet: null,
+    savingsUSD_pending: 0,
+    savingsUSD_paid: 0,
+    savingSessions: [],
+    payouts: [],
+  },
+  {
+    id: "hh-okafor",
+    name: "Okafor",
+    enodeUserId: null,
+    enodeHvacId: null,
+    isReal: false,
+    hvac: { currentTemp: 23, setpoint: 23, mode: "HEAT" },
+    credits: 0,
+    totalParticipations: 0,
+    xrplWallet: null,
+    savingsUSD_pending: 0,
+    savingsUSD_paid: 0,
+    savingSessions: [],
+    payouts: [],
   },
 ];
 
@@ -102,6 +175,10 @@ const EVENT_TEMPLATES: Record<
     /** Simple rule: how many °C to adjust (negative = reduce setpoint) */
     delta: number;
     creditsPerDegree: number;
+    /** Assumed event window in hours — savings accrue over this time */
+    durationHours: number;
+    /** USD saved per hour per degree of adjustment */
+    savingsRatePerHourPerDegree: number;
   }
 > = {
   DEMAND_REDUCTION: {
@@ -116,6 +193,8 @@ const EVENT_TEMPLATES: Record<
     price: 0.32,
     delta: -3,
     creditsPerDegree: 5,
+    durationHours: 2,
+    savingsRatePerHourPerDegree: 0.04,
   },
   PRICE_SPIKE: {
     title: "Electricity Price Spike — $0.45/kWh",
@@ -129,6 +208,8 @@ const EVENT_TEMPLATES: Record<
     price: 0.45,
     delta: -2,
     creditsPerDegree: 8,
+    durationHours: 3,
+    savingsRatePerHourPerDegree: 0.06,
   },
   HEAT_WAVE: {
     title: "Heat Wave — 105°F Expected",
@@ -142,6 +223,8 @@ const EVENT_TEMPLATES: Record<
     price: 0.38,
     delta: 3,
     creditsPerDegree: 6,
+    durationHours: 4,
+    savingsRatePerHourPerDegree: 0.05,
   },
   COLD_SNAP: {
     title: "Cold Snap — Heating Demand Surge",
@@ -155,6 +238,8 @@ const EVENT_TEMPLATES: Record<
     price: 0.29,
     delta: -2,
     creditsPerDegree: 7,
+    durationHours: 3,
+    savingsRatePerHourPerDegree: 0.04,
   },
   RENEWABLE_SURPLUS: {
     title: "Renewable Surplus — Free Energy",
@@ -168,6 +253,8 @@ const EVENT_TEMPLATES: Record<
     price: 0.04,
     delta: 2,
     creditsPerDegree: 3,
+    durationHours: 2,
+    savingsRatePerHourPerDegree: 0.02,
   },
 };
 
@@ -263,7 +350,20 @@ export function triggerGridEvent(eventType: EventType): {
 
   // Build recommendations for each household
   const newRecs: Recommendation[] = [];
+  const COMFORTABLE_BASELINE = 22; // °C — the "normal" setpoint users return to
+
   for (const hh of s.households) {
+    // ── Recovery: drift setpoint back toward the comfortable baseline ──
+    // Simulates the household returning to normal between DR events.
+    // This prevents the thermostat from getting stuck at 15°C floor.
+    const recoveryStep = Math.round(
+      (COMFORTABLE_BASELINE - hh.hvac.setpoint) * 0.7
+    );
+    if (recoveryStep !== 0) {
+      hh.hvac.setpoint += recoveryStep;
+      hh.hvac.currentTemp += Math.round(recoveryStep * 0.5);
+    }
+
     const current = hh.hvac.setpoint;
     const recommended = Math.max(15, Math.min(25, current + tpl.delta));
     const diff = Math.abs(recommended - current);
@@ -275,13 +375,22 @@ export function triggerGridEvent(eventType: EventType): {
       .replace("{credits}", `${credits}`)
       .replace("{savings}", `${(diff * 0.12).toFixed(2)}`);
 
+    // Compute estimated USD savings: rate × duration × degrees changed
+    const estimatedSavingsUSD = +(
+      tpl.savingsRatePerHourPerDegree *
+      tpl.durationHours *
+      diff
+    ).toFixed(4);
+
     const rec: Recommendation = {
       id: nextId("rec"),
       eventId: "", // will set below
+      eventType: eventType,
       householdId: hh.id,
       currentSetpoint: current,
       recommendedSetpoint: recommended,
       estimatedCredits: credits,
+      estimatedSavingsUSD,
       reason: body,
       status: "PENDING",
       respondedAt: null,
@@ -339,6 +448,29 @@ export function acceptRecommendation(recId: string): {
     hh.hvac.currentTemp += Math.sign(diff) * Math.min(Math.abs(diff), 1);
   }
 
+  // ── Create a saving session (time-based savings) ──────────
+  const tpl = EVENT_TEMPLATES[rec.eventType];
+  if (tpl) {
+    const degreeDelta = Math.abs(rec.recommendedSetpoint - rec.currentSetpoint);
+    const savingsUSD = +(
+      tpl.savingsRatePerHourPerDegree *
+      tpl.durationHours *
+      degreeDelta
+    ).toFixed(4);
+
+    const session: SavingSession = {
+      id: rec.id,
+      eventType: rec.eventType,
+      startTime: Date.now(),
+      durationHours: tpl.durationHours,
+      rateUSDPerHour: tpl.savingsRatePerHourPerDegree * degreeDelta,
+      degreeDelta,
+      savingsUSD,
+    };
+    hh.savingSessions.push(session);
+    hh.savingsUSD_pending += savingsUSD;
+  }
+
   return {
     recommendation: rec,
     household: hh,
@@ -380,4 +512,78 @@ export function syncHouseholdFromEnode(
   hh.hvac.currentTemp = currentTemp;
   hh.hvac.setpoint = setpoint;
   hh.hvac.mode = mode;
+}
+
+/* ------------------------------------------------------------------ */
+/*  XRPL wallet & payout helpers                                       */
+/* ------------------------------------------------------------------ */
+
+/** Payout threshold in USD — when pending savings >= this, send RLUSD */
+export const PAYOUT_THRESHOLD_USD = 1.0;
+
+/** Link an XRPL wallet to a household. */
+export function linkXrplWallet(
+  householdId: string,
+  address: string,
+  seed: string,
+  trustLineCreated: boolean = false
+): Household {
+  const hh = getState().households.find((h) => h.id === householdId);
+  if (!hh) throw new Error(`Household ${householdId} not found`);
+  hh.xrplWallet = { address, seed, trustLineCreated };
+  return hh;
+}
+
+/** Mark a household's XRPL trust line as created. */
+export function markTrustLineCreated(householdId: string): Household {
+  const hh = getState().households.find((h) => h.id === householdId);
+  if (!hh) throw new Error(`Household ${householdId} not found`);
+  if (!hh.xrplWallet) throw new Error(`No XRPL wallet linked`);
+  hh.xrplWallet.trustLineCreated = true;
+  return hh;
+}
+
+/**
+ * Check whether a household is ready for payout and record it.
+ * Returns the payout amount if threshold is met, null otherwise.
+ * The actual XRPL transaction should be done by the caller.
+ */
+export function checkAndRecordPayout(
+  householdId: string,
+  txHash: string
+): PayoutRecord | null {
+  const hh = getState().households.find((h) => h.id === householdId);
+  if (!hh) throw new Error(`Household ${householdId} not found`);
+  if (!hh.xrplWallet?.trustLineCreated) return null;
+  if (hh.savingsUSD_pending < PAYOUT_THRESHOLD_USD) return null;
+
+  const payoutAmount = +hh.savingsUSD_pending.toFixed(2);
+  const record: PayoutRecord = {
+    id: nextId("payout"),
+    amount: payoutAmount.toFixed(2),
+    txHash,
+    timestamp: new Date().toISOString(),
+    triggerSavings: payoutAmount,
+  };
+
+  hh.savingsUSD_pending = 0;
+  hh.savingsUSD_paid += payoutAmount;
+  hh.payouts.push(record);
+
+  return record;
+}
+
+/** Get a household by ID. */
+export function getHousehold(householdId: string): Household | null {
+  return getState().households.find((h) => h.id === householdId) ?? null;
+}
+
+/** Check if household has enough pending savings for a payout. */
+export function isPayoutReady(householdId: string): boolean {
+  const hh = getState().households.find((h) => h.id === householdId);
+  if (!hh) return false;
+  return (
+    !!hh.xrplWallet?.trustLineCreated &&
+    hh.savingsUSD_pending >= PAYOUT_THRESHOLD_USD
+  );
 }
