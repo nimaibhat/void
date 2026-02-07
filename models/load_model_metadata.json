@@ -1,0 +1,34 @@
+{
+  "trained_at": "2026-02-07T04:04:46.271259",
+  "train_r2": 0.974,
+  "test_r2": 0.8707,
+  "mae_mw": 3134.4,
+  "rmse_mw": 3950.5,
+  "n_train": 41976,
+  "n_test": 10494,
+  "features": [
+    "temperature_f",
+    "feels_like_f",
+    "HDD",
+    "CDD",
+    "wind_speed_mph",
+    "humidity_pct",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend"
+  ],
+  "feature_importance": {
+    "hour": 0.388,
+    "feels_like_f": 0.3683,
+    "temperature_f": 0.0638,
+    "CDD": 0.0498,
+    "wind_speed_mph": 0.0366,
+    "humidity_pct": 0.0331,
+    "month": 0.0263,
+    "day_of_week": 0.0179,
+    "HDD": 0.0116,
+    "is_weekend": 0.0046
+  },
+  "date_range": "2019-01-01 to 2024-12-31"
+}
