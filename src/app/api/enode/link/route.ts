@@ -5,14 +5,14 @@
  * where the user "logs into" a virtual vendor to connect sandbox devices.
  * This also implicitly creates the Enode user if they don't exist yet.
  *
- * Body: { userId: string, vendor?: string }
+ * Body: { userId: string, vendor?: string, redirectUri?: string }
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createLinkSession } from "@/lib/enode";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, vendor } = await req.json();
+    const { userId, vendor, redirectUri: bodyRedirectUri } = await req.json();
     if (!userId) {
       return NextResponse.json(
         { ok: false, error: "userId is required" },
@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
     }
 
     const redirectUri =
-      process.env.ENODE_REDIRECT_URI ??
+      bodyRedirectUri ||
+      process.env.ENODE_REDIRECT_URI ||
       `${req.nextUrl.origin}/devices?linked=true`;
 
     const session = await createLinkSession(userId, redirectUri, {

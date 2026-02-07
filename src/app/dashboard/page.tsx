@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AlertsPanel, { type AlertData } from "@/components/AlertsPanel";
+import EnhancedSmartDevicesPanel from "@/components/EnhancedSmartDevicesPanel";
+import XRPLWalletPanel from "@/components/XRPLWalletPanel";
 import { supabase } from "@/lib/supabase";
 import { useRealtimeAlerts, type LiveAlert } from "@/hooks/useRealtimeAlerts";
 import { fetchRecommendations, type HourlyPrice, type ConsumerRecommendation } from "@/lib/api";
@@ -17,6 +19,9 @@ interface Device {
   icon: string;
   status: string;
   value: string;
+  brand?: string;
+  model?: string;
+  type?: string;
 }
 
 interface Threat {
@@ -39,6 +44,8 @@ interface DashboardProfile {
   nextRiskWindow: string;
   smartActions: number;
   estSavings: number;
+  enodeUserId: string | null;
+  profileId: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -52,11 +59,9 @@ const DEFAULT_PROFILE: DashboardProfile = {
   homeType: "Single Family",
   sqft: 2400,
   devices: [
-    { name: "Thermostat", icon: "🌡️", status: "active", value: "72°F" },
-    { name: "EV Charger", icon: "🚗", status: "scheduled", value: "2:00 AM" },
-    { name: "Battery", icon: "🔋", status: "active", value: "78%" },
-    { name: "Solar Inverter", icon: "☀️", status: "active", value: "4.2 kW" },
-    { name: "Pool Pump", icon: "🏊", status: "deferred", value: "Off-peak" },
+    { name: "Carrier Infinity HVAC", icon: "🌡️", status: "active", value: "72°F", brand: "Carrier", model: "Infinity System", type: "thermostat" },
+    { name: "Tesla Powerwall", icon: "🔋", status: "active", value: "78%", brand: "Tesla", model: "Powerwall", type: "battery" },
+    { name: "SolarEdge HD-Wave Inverter", icon: "☀️", status: "active", value: "5.2 kW", brand: "SolarEdge", model: "HD-Wave", type: "solar_inverter" },
   ],
   threats: [
     { name: "Ice Storm — Austin Metro", severity: 3, region: "TX-AUSTIN-3" },
@@ -67,6 +72,8 @@ const DEFAULT_PROFILE: DashboardProfile = {
   nextRiskWindow: "Tue 2/10",
   smartActions: 3,
   estSavings: 14.2,
+  enodeUserId: null,
+  profileId: null,
 };
 
 /* ------------------------------------------------------------------ */
@@ -87,7 +94,7 @@ const DEVICE_ICON_MAP: Record<string, string> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapSupabaseRow(row: any): DashboardProfile {
   const devices: Device[] = (row.smart_devices ?? []).map(
-    (d: { type: string; name: string; level_pct?: number; capacity_kw?: number; level?: string; note?: string }) => ({
+    (d: { type: string; name: string; brand?: string; model?: string; level_pct?: number; capacity_kw?: number; level?: string; note?: string }) => ({
       name: d.name,
       icon: DEVICE_ICON_MAP[d.type] ?? "⚙️",
       status: "active",
@@ -95,6 +102,9 @@ function mapSupabaseRow(row: any): DashboardProfile {
         d.level_pct != null ? `${d.level_pct}%` :
         d.capacity_kw != null ? `${d.capacity_kw} kW` :
         d.level ?? d.note ?? "on",
+      brand: d.brand,
+      model: d.model,
+      type: d.type,
     })
   );
 
@@ -128,6 +138,8 @@ function mapSupabaseRow(row: any): DashboardProfile {
     nextRiskWindow: nextRiskShort,
     smartActions: (row.smart_actions ?? []).length,
     estSavings: Number(row.estimated_savings_dollars) || 0,
+    enodeUserId: row.enode_user_id ?? null,
+    profileId: row.id ?? null,
   };
 }
 
@@ -575,62 +587,7 @@ function PriceForecastChart({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Smart Devices Panel                                                */
-/* ------------------------------------------------------------------ */
-function SmartDevicesPanel({ devices }: { devices: Device[] }) {
-  if (!devices.length) {
-    return (
-      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px] flex items-center justify-center">
-        <span className="text-sm text-[#555] font-mono">
-          No smart devices connected
-        </span>
-      </div>
-    );
-  }
-
-  const statusColors: Record<string, string> = {
-    active: "bg-[#22c55e]",
-    scheduled: "bg-[#f59e0b]",
-    deferred: "bg-[#71717a]",
-    idle: "bg-[#52525b]",
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.3 }}
-      className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px]"
-    >
-      <h3 className="text-lg font-semibold text-white mb-4">Smart Devices</h3>
-      <div className="space-y-3">
-        {devices.map((d, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0a0a] border border-[#1a1a1a]"
-          >
-            <span className="text-xl flex-shrink-0">{d.icon}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-white truncate">
-                  {d.name}
-                </span>
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${statusColors[d.status] ?? "bg-[#52525b]"}`}
-                />
-              </div>
-              <span className="text-xs text-[#71717a]">{d.value}</span>
-            </div>
-            <span className="text-xs text-[#52525b] capitalize">
-              {d.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
+/* SmartDevicesPanel — replaced by EnhancedSmartDevicesPanel component */
 
 /* ------------------------------------------------------------------ */
 /*  Current time hook                                                  */
@@ -687,6 +644,8 @@ function DashboardContent() {
   const [priceLoading, setPriceLoading] = useState(true);
   const [alerts, setAlerts] = useState<AlertData[]>([]);
   const [recommendation, setRecommendation] = useState<ConsumerRecommendation | null>(null);
+  const [enodeUserId, setEnodeUserId] = useState<string | null>(null);
+  const [householdId, setHouseholdId] = useState<string | null>("hh-martinez");
   const time = useCurrentTime();
 
   // Build savings history from optimized_schedule or use defaults
@@ -696,6 +655,15 @@ function DashboardContent() {
 
   // Realtime live alerts from orchestrated simulations
   const { liveAlerts } = useRealtimeAlerts(profile.gridRegion);
+
+  // Derive householdId from profile name
+  const deriveHouseholdId = (name: string): string | null => {
+    const lower = name.toLowerCase();
+    if (lower.includes("martinez")) return "hh-martinez";
+    if (lower.includes("chen")) return "hh-chen";
+    if (lower.includes("sharma")) return "hh-sharma";
+    return null;
+  };
 
   // Fetch profile from Supabase
   useEffect(() => {
@@ -710,7 +678,10 @@ function DashboardContent() {
         if (error || !data) {
           console.error("Failed to fetch profile:", error);
         } else {
-          setProfile(mapSupabaseRow(data));
+          const mapped = mapSupabaseRow(data);
+          setProfile(mapped);
+          setEnodeUserId(mapped.enodeUserId);
+          setHouseholdId(deriveHouseholdId(mapped.name));
         }
         setLoading(false);
       });
@@ -952,12 +923,24 @@ function DashboardContent() {
             <PriceForecastChart prices={priceData} loading={priceLoading} />
           </div>
           <div className="lg:col-span-2">
-            <SmartDevicesPanel devices={profile.devices} />
+            <EnhancedSmartDevicesPanel
+              devices={profile.devices}
+              enodeUserId={enodeUserId}
+              onEnodeUserIdChange={setEnodeUserId}
+              profileId={profileId}
+            />
           </div>
         </div>
 
         {/* ---------------------------------------------------------- */}
-        {/*  ROW 3 — Alerts                                             */}
+        {/*  ROW 3 — XRPL Rewards                                      */}
+        {/* ---------------------------------------------------------- */}
+        <div className="grid grid-cols-1 gap-6">
+          <XRPLWalletPanel householdId={householdId} />
+        </div>
+
+        {/* ---------------------------------------------------------- */}
+        {/*  ROW 4 — Alerts                                             */}
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 gap-6">
           <AlertsPanel

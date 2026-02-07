@@ -36,6 +36,18 @@ export interface PayoutRecord {
   triggerSavings: number;        // what savingsPending was before payout
 }
 
+export interface HouseholdDevice {
+  type: "thermostat" | "ev_charger" | "battery" | "solar_inverter" | "pool_pump" | "smart_water_heater" | "generator";
+  name: string;
+  brand: string;
+  model: string;
+  status: "active" | "idle" | "scheduled" | "offline";
+  level_pct?: number;
+  capacity_kw?: number;
+  level?: string;
+  note?: string;
+}
+
 export interface Household {
   id: string;
   name: string;
@@ -47,6 +59,7 @@ export interface Household {
     setpoint: number;      // °C
     mode: "HEAT" | "COOL" | "OFF";
   };
+  devices: HouseholdDevice[];
   credits: number;
   totalParticipations: number;
   /** XRPL wallet linked to this household (null = not yet set up) */
@@ -118,6 +131,11 @@ const DEFAULT_HOUSEHOLDS: Household[] = [
     enodeHvacId: null,
     isReal: false,
     hvac: { currentTemp: 22, setpoint: 22, mode: "HEAT" },
+    devices: [
+      { type: "thermostat", name: "Carrier Infinity", brand: "Carrier", model: "Infinity 24VNA9", status: "active", note: "72°F" },
+      { type: "battery", name: "Tesla Powerwall", brand: "Tesla", model: "Powerwall 2", status: "active", level_pct: 78, capacity_kw: 13.5 },
+      { type: "solar_inverter", name: "SolarEdge Inverter", brand: "SolarEdge", model: "HD-Wave SE7600H", status: "active", capacity_kw: 5.2 },
+    ],
     credits: 0,
     totalParticipations: 0,
     xrplWallet: null,
@@ -128,11 +146,19 @@ const DEFAULT_HOUSEHOLDS: Household[] = [
   },
   {
     id: "hh-chen",
-    name: "Chen",
+    name: "James & Linda Chen",
     enodeUserId: null,
     enodeHvacId: null,
     isReal: false,
     hvac: { currentTemp: 21, setpoint: 21, mode: "HEAT" },
+    devices: [
+      { type: "thermostat", name: "Nest Learning Thermostat", brand: "Google Nest", model: "Learning 4th Gen", status: "active", note: "70°F" },
+      { type: "battery", name: "Tesla Powerwall+", brand: "Tesla", model: "Powerwall+", status: "active", level_pct: 92, capacity_kw: 13.5 },
+      { type: "solar_inverter", name: "SMA Sunny Boy", brand: "SMA", model: "Sunny Boy 7.7-US", status: "active", capacity_kw: 7.6 },
+      { type: "ev_charger", name: "ChargePoint Home Flex", brand: "ChargePoint", model: "Home Flex", status: "scheduled", level: "Level 2", note: "2:00 AM" },
+      { type: "pool_pump", name: "Hayward VS Pool Pump", brand: "Hayward", model: "Super Pump VS 700", status: "scheduled", capacity_kw: 1.5, note: "Off-peak" },
+      { type: "smart_water_heater", name: "Rheem Smart Water Heater", brand: "Rheem", model: "ProTerra Hybrid", status: "active", capacity_kw: 4.5 },
+    ],
     credits: 0,
     totalParticipations: 0,
     xrplWallet: null,
@@ -142,12 +168,16 @@ const DEFAULT_HOUSEHOLDS: Household[] = [
     payouts: [],
   },
   {
-    id: "hh-okafor",
-    name: "Okafor",
+    id: "hh-sharma",
+    name: "Priya Sharma",
     enodeUserId: null,
     enodeHvacId: null,
     isReal: false,
     hvac: { currentTemp: 23, setpoint: 23, mode: "HEAT" },
+    devices: [
+      { type: "thermostat", name: "Ecobee SmartThermostat", brand: "Ecobee", model: "SmartThermostat Premium", status: "active", note: "73°F" },
+      { type: "solar_inverter", name: "Enphase Microinverter", brand: "Enphase", model: "IQ8+", status: "active", capacity_kw: 3.8 },
+    ],
     credits: 0,
     totalParticipations: 0,
     xrplWallet: null,
