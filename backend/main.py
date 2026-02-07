@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.routers import consumer, forecast, grid, simulate, utility, weather
 from app.schemas.responses import ErrorResponse
+from app.services.ercot_data_service import ercot_data
 from app.services.grid_graph_service import grid_graph
 from app.services.price_service import price_service
 from app.services.weather_service import weather_service
@@ -15,8 +16,9 @@ from app.services.weather_service import weather_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: load grid graph, SFNO weather model, XGBoost price model.
+    # Startup: load ACTIVSg2000 grid, ERCOT load data, weather model, price model.
     grid_graph.load()
+    ercot_data.load()
     await weather_service.load_model()
     await price_service.load_model()
     yield

@@ -1,21 +1,24 @@
-"""Demand Forecast Service — converts weather temperatures to electricity
-demand multipliers per grid node.
+"""Demand Service — distributes real ERCOT zone-level load data
+proportionally across buses by their base Pd values.
 
-Uses heating/cooling degree-hours, a 24-hour time-of-day curve, and
-regional sensitivity multipliers to compute how much load each node
-actually draws under a given weather scenario.
+Uses actual ERCOT load data from the Native_Load_2021.xlsx file.
+For Uri scenarios, applies a demand uplift factor because the ERCOT data
+reflects *served* load (post-curtailment), not the true *demanded* load.
+ERCOT estimated ~76 GW demand during Uri peak but could only serve ~46 GW.
 """
 
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Tuple
+import logging
+from typing import Dict
 
+from app.services.ercot_data_service import ercot_data
 from app.services.grid_graph_service import grid_graph
-from app.services.weather_service import CITIES
+
+logger = logging.getLogger("blackout.demand")
 
 # ── Time-of-day load curve (hour → multiplier) ─────────────────────
-# Peak 6-9 PM ≈ 1.15×, trough 3-5 AM ≈ 0.57×.
+# Kept here because price_service imports it for price modeling.
 
 TOD_CURVE: Dict[int, float] = {
     0: 0.65, 1: 0.60, 2: 0.58, 3: 0.57, 4: 0.57, 5: 0.60,
@@ -24,134 +27,57 @@ TOD_CURVE: Dict[int, float] = {
     18: 1.15, 19: 1.15, 20: 1.12, 21: 1.05, 22: 0.90, 23: 0.78,
 }
 
-# ── Regional heating/cooling sensitivity ────────────────────────────
-# ERCOT has high heating sensitivity due to poor winterization.
-
-REGION_SENSITIVITY: Dict[str, Dict[str, float]] = {
-    "ERCOT":  {"heat": 0.05,  "cool": 0.03},
-    "PJM":    {"heat": 0.025, "cool": 0.03},
-    "NYISO":  {"heat": 0.025, "cool": 0.03},
-    "MISO":   {"heat": 0.03,  "cool": 0.03},
-    "ISO-NE": {"heat": 0.025, "cool": 0.025},
-    "CAISO":  {"heat": 0.02,  "cool": 0.04},
-    "SPP":    {"heat": 0.035, "cool": 0.03},
-}
-
-# ── Hardcoded fallback temperatures for Uri (Feb 14–15 2021, ~h36) ──
-
-URI_FALLBACK_TEMPS: Dict[str, float] = {
-    "Austin, TX": 12.0,
-    "Houston, TX": 18.0,
-    "Dallas, TX": 8.0,
-    "San Antonio, TX": 15.0,
-    "Los Angeles, CA": 55.0,
-    "New York, NY": 25.0,
-    "Chicago, IL": 10.0,
-}
-
-
-# ── Helpers ─────────────────────────────────────────────────────────
-
-
-def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in km (good enough for nearest-city lookup)."""
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def nearest_city(lat: float, lon: float) -> str:
-    """Return the CITIES key closest to the given coordinate."""
-    best_name = ""
-    best_dist = float("inf")
-    for name, (clat, clon) in CITIES.items():
-        d = _haversine(lat, lon, clat, clon)
-        if d < best_dist:
-            best_dist = d
-            best_name = name
-    return best_name
-
-
-# ── Public API ──────────────────────────────────────────────────────
-
-
-def get_city_temps_for_hour(
-    city_forecasts: Dict[str, Any] | None,
-    forecast_hour: int,
-) -> Dict[str, float]:
-    """Extract per-city temperature at *forecast_hour*.
-
-    Falls back to URI_FALLBACK_TEMPS if forecast data is unavailable.
-    """
-    if city_forecasts is None:
-        return dict(URI_FALLBACK_TEMPS)
-
-    cities_data: Dict[str, Any] = city_forecasts.get("cities", {})
-    temps: Dict[str, float] = {}
-    for city_name in CITIES:
-        city = cities_data.get(city_name)
-        if city is None:
-            temps[city_name] = URI_FALLBACK_TEMPS.get(city_name, 65.0)
-            continue
-
-        # Find the hourly entry closest to forecast_hour.
-        hourly: List[Dict[str, Any]] = city.get("hourly", [])
-        best_entry = min(
-            hourly,
-            key=lambda h: abs(h["hour"] - forecast_hour),
-            default=None,
-        )
-        temps[city_name] = (
-            best_entry["temp_f"] if best_entry else URI_FALLBACK_TEMPS.get(city_name, 65.0)
-        )
-
-    return temps
+# During Uri, actual demand was ~65% higher than served load due to forced
+# load shedding. This factor restores the uncurtailed demand estimate.
+URI_DEMAND_UPLIFT = 1.65
 
 
 def compute_demand_multipliers(
-    city_temps: Dict[str, float],
-    forecast_hour: int,
-    region: str = "ERCOT",
+    scenario: str = "uri",
+    forecast_hour: int = 36,
 ) -> Dict[str, float]:
-    """Compute demand multiplier for every node in the grid.
+    """Compute demand multiplier for every node in the grid using real ERCOT data.
 
-    Formula per node:
-        demand = base_load × tod × (1 + heat_sens × hdh + cool_sens × cdh)
+    For each bus:
+      1. Get the bus's ERCOT weather zone
+      2. Get total base_load_mw for all buses in that zone (sum of Pd values)
+      3. Get actual zone load from ERCOT data (uplifted for Uri)
+      4. Multiplier = zone_demand / total_zone_base_load
 
-    where:
-        hdh = max(0, 65 - temp_f)   (heating degree-hours)
-        cdh = max(0, temp_f - 75)   (cooling degree-hours)
-        tod = time-of-day curve value for the forecast hour
+    This distributes real zone-level load proportionally across buses.
     """
-    sens = REGION_SENSITIVITY.get(region, REGION_SENSITIVITY["ERCOT"])
-    heat_sens = sens["heat"]
-    cool_sens = sens["cool"]
+    zone_loads = ercot_data.get_scenario_loads(scenario, forecast_hour)
 
-    # TOD multiplier — use forecast_hour mod 24 for the diurnal curve.
-    tod = TOD_CURVE.get(forecast_hour % 24, 1.0)
+    if not zone_loads:
+        logger.warning("No ERCOT load data for scenario=%s hour=%d, using defaults", scenario, forecast_hour)
+        if scenario in ("uri", "uri_2021"):
+            return {nid: 2.5 for nid in grid_graph.get_node_ids()}
+        return {nid: 1.0 for nid in grid_graph.get_node_ids()}
 
+    # For Uri: uplift served load to estimate true demand
+    uplift = URI_DEMAND_UPLIFT if scenario in ("uri", "uri_2021") else 1.0
+
+    # Compute total base load per weather zone
+    zone_base_totals: Dict[str, float] = {}
+    for zone_name in grid_graph.get_weather_zones():
+        total = 0.0
+        for nid in grid_graph.get_nodes_in_weather_zone(zone_name):
+            total += grid_graph.graph.nodes[nid]["base_load_mw"]
+        zone_base_totals[zone_name] = total
+
+    # Compute per-node multipliers
     multipliers: Dict[str, float] = {}
+    for nid in grid_graph.get_node_ids():
+        nd = grid_graph.graph.nodes[nid]
+        wz = nd["weather_zone"]
+        base_total = zone_base_totals.get(wz, 0.0)
+        actual_load = zone_loads.get(wz, 0.0) * uplift
 
-    for node_id in grid_graph.get_node_ids():
-        node = grid_graph.graph.nodes[node_id]
-        nlat = node["lat"]
-        nlon = node["lon"]
+        if base_total > 0 and actual_load > 0:
+            multiplier = actual_load / base_total
+        else:
+            multiplier = 1.0
 
-        # Assign nearest city temperature.
-        city = nearest_city(nlat, nlon)
-        temp_f = city_temps.get(city, 65.0)
-
-        hdh = max(0.0, 65.0 - temp_f)
-        cdh = max(0.0, temp_f - 75.0)
-
-        multiplier = tod * (1.0 + heat_sens * hdh + cool_sens * cdh)
-        multipliers[node_id] = round(multiplier, 4)
+        multipliers[nid] = round(multiplier, 4)
 
     return multipliers

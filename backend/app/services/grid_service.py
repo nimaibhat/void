@@ -1,5 +1,5 @@
-"""Grid Service — orchestrates grid graph, demand, and weather data
-to produce grid-status, topology, and cascade-probability responses.
+"""Grid Service — orchestrates grid graph and demand data to produce
+grid-status, topology, and cascade-probability responses.
 """
 
 from __future__ import annotations
@@ -11,15 +11,8 @@ from typing import Any, Dict, List
 from app.services import demand_service
 from app.services.cascade_service import run_cascade
 from app.services.grid_graph_service import grid_graph
-from app.services.weather_service import weather_service
 
 logger = logging.getLogger("blackout.grid_service")
-
-# ── Scenario → start_time mapping (for named scenarios) ────────────
-
-SCENARIO_START_TIMES: Dict[str, str] = {
-    "uri_2021": "2021-02-13T00:00:00",
-}
 
 DEFAULT_FORECAST_HOUR = 36
 
@@ -31,17 +24,13 @@ async def get_grid_status(
     scenario: str = "uri_2021",
     forecast_hour: int = DEFAULT_FORECAST_HOUR,
 ) -> Dict[str, Any]:
-    """Compute grid status with demand applied from a weather scenario.
+    """Compute grid status with demand from real ERCOT load data.
 
-    1. Fetch city temperatures (from weather service or fallback).
-    2. Compute demand multipliers.
-    3. Apply to graph nodes, classify each node.
-    4. Build summary stats.
+    1. Compute demand multipliers from ERCOT zone data.
+    2. Apply to graph nodes, classify each node.
+    3. Build summary stats.
     """
-    city_temps = await _get_city_temps(scenario, forecast_hour)
-    multipliers = demand_service.compute_demand_multipliers(
-        city_temps, forecast_hour, region="ERCOT"
-    )
+    multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
 
     nodes: List[Dict[str, Any]] = []
     stressed = failed = nominal = 0
@@ -76,11 +65,11 @@ async def get_grid_status(
                 "load_pct": round(pct, 1),
                 "load_mw": round(load, 1),
                 "capacity_mw": round(cap, 1),
+                "weather_zone": nd["weather_zone"],
             }
         )
 
     total = len(nodes)
-    # Cascade probability = fraction of nodes above 80 % load.
     cascade_prob = round((stressed + failed) / total, 2) if total else 0.0
 
     return {
@@ -120,7 +109,7 @@ def get_node_detail(node_id: str) -> Dict[str, Any] | None:
         return None
 
     cap = nd["capacity_mw"]
-    load = nd["base_load_mw"]  # base load (no scenario applied)
+    load = nd["base_load_mw"]
     pct = (load / cap * 100.0) if cap > 0 else 0.0
 
     if pct > 100:
@@ -149,6 +138,7 @@ def get_node_detail(node_id: str) -> Dict[str, Any] | None:
         "status": status,
         "voltage_kv": nd["voltage_kv"],
         "region": nd["region"],
+        "weather_zone": nd.get("weather_zone", "Unknown"),
         "connected_nodes": nd["connected_nodes"],
         "risk_level": risk,
     }
@@ -158,14 +148,8 @@ async def get_cascade_probability(
     scenario: str = "uri_2021",
     forecast_hour: int = DEFAULT_FORECAST_HOUR,
 ) -> Dict[str, Any]:
-    """Cascade probability per ISO region.
-
-    Computed for ERCOT from the actual grid; other regions use mock values.
-    """
-    city_temps = await _get_city_temps(scenario, forecast_hour)
-    multipliers = demand_service.compute_demand_multipliers(
-        city_temps, forecast_hour, region="ERCOT"
-    )
+    """Cascade probability for ERCOT from real load data."""
+    multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
 
     total = 0
     above_80 = 0
@@ -193,24 +177,3 @@ async def get_cascade_probability(
         "forecast_hour": forecast_hour,
         "scenario": scenario,
     }
-
-
-# ── Internal helpers ────────────────────────────────────────────────
-
-
-async def _get_city_temps(
-    scenario: str,
-    forecast_hour: int,
-) -> Dict[str, float]:
-    """Fetch city temps from weather service, falling back to hardcoded values."""
-    start_time_str = SCENARIO_START_TIMES.get(scenario)
-    city_forecasts = None
-
-    if start_time_str and weather_service.model_loaded:
-        try:
-            dt = datetime.fromisoformat(start_time_str).replace(tzinfo=timezone.utc)
-            city_forecasts = await weather_service.get_city_forecasts(dt)
-        except Exception as exc:
-            logger.warning("Weather service unavailable, using fallback: %s", exc)
-
-    return demand_service.get_city_temps_for_hour(city_forecasts, forecast_hour)

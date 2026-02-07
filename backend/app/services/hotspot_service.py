@@ -1,4 +1,7 @@
-"""Hotspot Service — city-level severity markers and transmission arcs for the operator globe."""
+"""Hotspot Service — city-level severity markers and transmission arcs for the operator globe.
+
+Uses ERCOT weather zone aggregation from the ACTIVSg2000 grid.
+"""
 
 from __future__ import annotations
 
@@ -8,35 +11,18 @@ from app.models.grid import ArcsResponse, GridArc, GridHotspot, HotspotsResponse
 from app.services import demand_service
 from app.services.grid_graph_service import grid_graph
 
-# ── City-level hotspots with real coordinates ───────────────────────
+# ── City-level hotspots mapped to ERCOT weather zones ───────────────
 
 _HOTSPOT_CITIES: List[Dict[str, Any]] = [
-    {"id": "HS-HOU", "name": "Houston", "lat": 29.76, "lon": -95.37, "cluster": "HOU"},
-    {"id": "HS-DAL", "name": "Dallas", "lat": 32.78, "lon": -96.80, "cluster": "DAL"},
-    {"id": "HS-AUS", "name": "Austin", "lat": 30.27, "lon": -97.74, "cluster": "AUS"},
-    {"id": "HS-SAT", "name": "San Antonio", "lat": 29.42, "lon": -98.49, "cluster": "SAT"},
-    {"id": "HS-CRP", "name": "Corpus Christi", "lat": 27.80, "lon": -97.40, "cluster": "CRP"},
-    {"id": "HS-MID", "name": "Midland", "lat": 31.99, "lon": -102.08, "cluster": "WTX"},
-    {"id": "HS-LBK", "name": "Lubbock", "lat": 33.58, "lon": -101.85, "cluster": "LBK"},
-    {"id": "HS-ELP", "name": "El Paso", "lat": 31.76, "lon": -106.44, "cluster": "ELP"},
+    {"id": "HS-HOU", "name": "Houston",        "lat": 29.76, "lon": -95.37, "weather_zone": "Coast"},
+    {"id": "HS-DAL", "name": "Dallas",          "lat": 32.78, "lon": -96.80, "weather_zone": "North Central"},
+    {"id": "HS-AUS", "name": "Austin",          "lat": 30.27, "lon": -97.74, "weather_zone": "South Central"},
+    {"id": "HS-SAT", "name": "San Antonio",     "lat": 29.42, "lon": -98.49, "weather_zone": "South Central"},
+    {"id": "HS-CRP", "name": "Corpus Christi",  "lat": 27.80, "lon": -97.40, "weather_zone": "Southern"},
+    {"id": "HS-MID", "name": "Midland",         "lat": 31.99, "lon": -102.08, "weather_zone": "Far West"},
+    {"id": "HS-LBK", "name": "Lubbock",         "lat": 33.58, "lon": -101.85, "weather_zone": "West"},
+    {"id": "HS-ELP", "name": "El Paso",         "lat": 31.76, "lon": -106.44, "weather_zone": "Far West"},
 ]
-
-# Node prefix → hotspot cluster mapping (for aggregation)
-_NODE_TO_HOTSPOT: Dict[str, str] = {
-    "HOU": "HOU",
-    "DAL": "DAL",
-    "AUS": "AUS",
-    "SAT": "SAT",
-    "WTX": "WTX",
-    "CRP": "CRP",
-    "LBK": "LBK",
-    "ELP": "ELP",
-    "BEA": "HOU",
-    "TYL": "DAL",
-    "WCO": "AUS",
-    "AMR": "WTX",
-    "LRD": "SAT",
-}
 
 # ── Transmission corridors ──────────────────────────────────────────
 
@@ -56,16 +42,8 @@ _ARC_DEFS: List[Dict[str, Any]] = [
 
 def _get_node_loads(scenario: str) -> Dict[str, Tuple[float, float]]:
     """Return {node_id: (load_mw, capacity_mw)} for all nodes."""
-    if scenario == "uri":
-        city_temps = demand_service.URI_FALLBACK_TEMPS
-        forecast_hour = 36
-    else:
-        city_temps = {city: 65.0 for city in demand_service.URI_FALLBACK_TEMPS}
-        forecast_hour = 12
-
-    multipliers = demand_service.compute_demand_multipliers(
-        city_temps, forecast_hour, region="ERCOT"
-    )
+    forecast_hour = 36 if scenario == "uri" else 12
+    multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
 
     result: Dict[str, Tuple[float, float]] = {}
     for nid in grid_graph.get_node_ids():
@@ -76,19 +54,18 @@ def _get_node_loads(scenario: str) -> Dict[str, Tuple[float, float]]:
     return result
 
 
-def _status_for_cluster(cluster: str, node_loads: Dict[str, Tuple[float, float]]) -> Tuple[str, float, float, float]:
-    """Aggregate status for a cluster of nodes. Returns (status, load, capacity, risk_pct)."""
+def _status_for_zone(zone: str, node_loads: Dict[str, Tuple[float, float]]) -> Tuple[str, float, float, float]:
+    """Aggregate status for a weather zone. Returns (status, load, capacity, risk_pct)."""
     total_load = 0.0
     total_cap = 0.0
 
-    for nid, (load, cap) in node_loads.items():
-        prefix = nid.split("_")[0]
-        mapped = _NODE_TO_HOTSPOT.get(prefix)
-        if mapped == cluster:
+    zone_node_ids = grid_graph.get_nodes_in_weather_zone(zone)
+    for nid in zone_node_ids:
+        if nid in node_loads:
+            load, cap = node_loads[nid]
             total_load += load
             total_cap += cap
 
-    # For scattered single-node cities with no direct nodes, use small defaults
     if total_cap == 0:
         return ("normal", 0.0, 0.0, 0.0)
 
@@ -106,12 +83,12 @@ def _status_for_cluster(cluster: str, node_loads: Dict[str, Tuple[float, float]]
 
 
 def get_hotspots(scenario: str = "uri") -> HotspotsResponse:
-    """Return city-level hotspots with severity derived from node data."""
+    """Return city-level hotspots with severity derived from weather zone data."""
     node_loads = _get_node_loads(scenario)
     hotspots: List[GridHotspot] = []
 
     for city in _HOTSPOT_CITIES:
-        status, load, cap, risk = _status_for_cluster(city["cluster"], node_loads)
+        status, load, cap, risk = _status_for_zone(city["weather_zone"], node_loads)
         hotspots.append(GridHotspot(
             id=city["id"],
             name=city["name"],
@@ -128,17 +105,15 @@ def get_hotspots(scenario: str = "uri") -> HotspotsResponse:
 
 def get_arcs(scenario: str = "uri") -> ArcsResponse:
     """Return transmission arcs between hotspot cities."""
-    # Build a lookup of hotspot coords
     coords: Dict[str, Tuple[float, float]] = {}
     for city in _HOTSPOT_CITIES:
         coords[city["id"]] = (city["lat"], city["lon"])
 
-    # Get node loads for utilization calculation
     node_loads = _get_node_loads(scenario)
 
     # Compute average utilization across the grid for arc scaling
-    total_load = sum(l for l, c in node_loads.values())
-    total_cap = sum(c for l, c in node_loads.values())
+    total_load = sum(load for load, cap in node_loads.values())
+    total_cap = sum(cap for load, cap in node_loads.values())
     grid_util = (total_load / total_cap * 100) if total_cap > 0 else 50.0
 
     arcs: List[GridArc] = []
@@ -148,19 +123,17 @@ def get_arcs(scenario: str = "uri") -> ArcsResponse:
         src_coords = coords[src]
         tgt_coords = coords[tgt]
 
-        # Derive arc flow from average of source/target cluster loads
-        src_cluster = next(c["cluster"] for c in _HOTSPOT_CITIES if c["id"] == src)
-        tgt_cluster = next(c["cluster"] for c in _HOTSPOT_CITIES if c["id"] == tgt)
+        src_zone = next(c["weather_zone"] for c in _HOTSPOT_CITIES if c["id"] == src)
+        tgt_zone = next(c["weather_zone"] for c in _HOTSPOT_CITIES if c["id"] == tgt)
 
-        src_status = _status_for_cluster(src_cluster, node_loads)
-        tgt_status = _status_for_cluster(tgt_cluster, node_loads)
+        src_status = _status_for_zone(src_zone, node_loads)
+        tgt_status = _status_for_zone(tgt_zone, node_loads)
 
-        # Arc capacity is proportional to the smaller cluster's capacity
-        arc_cap = min(src_status[2], tgt_status[2]) * 0.3  # ~30% of cluster capacity
+        # Arc capacity proportional to smaller zone's capacity
+        arc_cap = min(src_status[2], tgt_status[2]) * 0.3
         if arc_cap == 0:
             arc_cap = 100.0
 
-        # Flow based on grid utilization with some variation
         flow = arc_cap * (grid_util / 100)
         util_pct = round(min(flow / arc_cap * 100, 100), 1)
 
