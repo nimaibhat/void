@@ -43,6 +43,9 @@ yarn-error.log*
 # large data files (MATPOWER, ERCOT xlsx)
 /backend/app/data/
 
+# ML model binaries
+*.pkl
+
 # python
 __pycache__/
 *.pyc
