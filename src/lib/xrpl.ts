@@ -283,7 +283,7 @@ export async function getRecentTransactions(
         const t = tx.tx_json;
         if (!t || t.TransactionType !== "Payment") return false;
         const amt = t.Amount;
-        if (typeof amt === "string") return false; // XRP payment
+        if (!amt || typeof amt === "string") return false; // XRP payment or no amount
         return (
           (amt as xrpl.IssuedCurrencyAmount).currency === CURRENCY_CODE &&
           (amt as xrpl.IssuedCurrencyAmount).issuer === issuer

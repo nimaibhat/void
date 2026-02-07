@@ -381,15 +381,12 @@ def download_supabase_data() -> pd.DataFrame:
     if not supabase_url:
         supabase_url = env_vars.get("NEXT_PUBLIC_SUPABASE_URL", "")
     if not supabase_key:
-        # Prefer anon key for REST API; fall back to publishable key
-        supabase_key = (
-            env_vars.get("SUPABASE_ANON_KEY", "")
-            or env_vars.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY", "")
-        )
+        # Use anon key for REST API
+        supabase_key = env_vars.get("SUPABASE_ANON_KEY", "")
 
     if not supabase_url or not supabase_key:
         print("ERROR: Missing Supabase credentials.")
-        print("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY)")
+        print("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_ANON_KEY")
         print(f"in environment or in {env_path}")
         sys.exit(1)
 

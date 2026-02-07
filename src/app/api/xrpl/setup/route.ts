@@ -58,33 +58,45 @@ export async function POST(req: NextRequest) {
 
     /* ── Create RLUSD trust line ────────────────────── */
     if (action === "trustline") {
-      const { householdId } = body;
-      if (!householdId) {
-        return NextResponse.json(
-          { ok: false, error: "householdId is required." },
-          { status: 400 }
-        );
+      const { householdId, seed } = body;
+
+      // Support both old (householdId) and new (seed) formats
+      let walletSeed = seed;
+
+      if (!walletSeed && householdId) {
+        // Fallback to household lookup for backwards compatibility
+        const hh = getHousehold(householdId);
+        if (!hh) {
+          return NextResponse.json(
+            { ok: false, error: `Household ${householdId} not found.` },
+            { status: 404 }
+          );
+        }
+        if (!hh.xrplWallet) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "No XRPL wallet linked to this household. Call with action=link first.",
+            },
+            { status: 400 }
+          );
+        }
+        walletSeed = hh.xrplWallet.seed;
       }
-      const hh = getHousehold(householdId);
-      if (!hh) {
+
+      if (!walletSeed) {
         return NextResponse.json(
-          { ok: false, error: `Household ${householdId} not found.` },
-          { status: 404 }
-        );
-      }
-      if (!hh.xrplWallet) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "No XRPL wallet linked to this household. Call with action=link first.",
-          },
+          { ok: false, error: "seed or householdId is required." },
           { status: 400 }
         );
       }
 
-      const txResult = await createRLUSDTrustLine(hh.xrplWallet.seed);
-      markTrustLineCreated(householdId);
+      const txResult = await createRLUSDTrustLine(walletSeed);
+
+      // Mark trust line created if using householdId
+      if (householdId) {
+        markTrustLineCreated(householdId);
+      }
 
       const meta = txResult.result.meta;
       const txStatus =
@@ -98,7 +110,7 @@ export async function POST(req: NextRequest) {
         txResult: txStatus,
         issuer: getIssuerAddress(),
         message:
-          "Trust line created for RLUSD. This household can now receive RLUSD payouts.",
+          "Trust line created for RLUSD. This profile can now receive RLUSD payouts.",
       });
     }
 

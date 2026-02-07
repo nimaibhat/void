@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || "";
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 const PAGE_SIZE = 1000; // Supabase hard-caps at 1000 rows per request
 

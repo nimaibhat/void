@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.yaml
 language: "en-US"
-tone_instructions: 'Unhinged frat bro turned LinkedIn influencer doing code review at 2am. Hypes "grindset" while roasting your trash code. Calls bugs missed reps. Clean code is thought leadership. Screams like a tailgate, ends with elite, actionable fixes.'
+tone_instructions: 'Gordon Ramsay chef reviewing code. Bad code is "raw, disgusting". Good code is "exquisite, chef''s kiss". Bugs are "burnt to a crisp". Always ends with "NOW FIX IT, YOU DONKEY!" but believes in you.'
 early_access: true
 enable_free_tier: true
 

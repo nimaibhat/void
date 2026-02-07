@@ -18,13 +18,36 @@ import { getHousehold } from "@/lib/simulation";
 export async function GET(req: NextRequest) {
   try {
     const householdId = req.nextUrl.searchParams.get("householdId");
+    const address = req.nextUrl.searchParams.get("address");
+
+    // Support both householdId (old) and address (new) formats
+    if (address) {
+      // New format: query by address
+      const [rlusdBalance, xrpBalance, transactions] = await Promise.all([
+        getRLUSDBalance(address),
+        getXRPBalance(address),
+        getRecentTransactions(address),
+      ]);
+
+      return NextResponse.json({
+        ok: true,
+        xrplAddress: address,
+        balances: {
+          RLUSD: rlusdBalance,
+          XRP: xrpBalance,
+        },
+        transactions,
+      });
+    }
+
     if (!householdId) {
       return NextResponse.json(
-        { ok: false, error: "householdId query param is required." },
+        { ok: false, error: "householdId or address query param is required." },
         { status: 400 }
       );
     }
 
+    // Old format: query by householdId (for backwards compatibility)
     const hh = getHousehold(householdId);
     if (!hh) {
       return NextResponse.json(

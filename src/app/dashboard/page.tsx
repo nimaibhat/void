@@ -481,7 +481,7 @@ function DashboardContent() {
     return null;
   };
 
-  // Fetch profile from Supabase
+  // Fetch profile from Supabase (always — no hardcoded fallback)
   useEffect(() => {
     setLoading(true);
     supabase
@@ -789,8 +789,9 @@ function DashboardContent() {
             <PriceForecastChart prices={priceData} loading={priceLoading} zone={profile.weatherZone} />
           </div>
           <div className="lg:col-span-2">
+            {/* Only show Enode devices, no hardcoded devices */}
             <EnhancedSmartDevicesPanel
-              devices={profile.devices}
+              devices={[]}
               enodeUserId={enodeUserId}
               onEnodeUserIdChange={setEnodeUserId}
               profileId={profileId}
@@ -802,7 +803,7 @@ function DashboardContent() {
         {/*  ROW 3 — XRPL Rewards                                      */}
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 gap-6">
-          <XRPLWalletPanel householdId={householdId} />
+          <XRPLWalletPanel householdId={householdId} profileId={profileId} />
         </div>
 
         {/* ---------------------------------------------------------- */}

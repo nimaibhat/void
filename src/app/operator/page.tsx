@@ -799,11 +799,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
           />
           <CascadeProbabilityCard
             probability={ercotProb}
-            totalLoad={
-              liveSession?.total_load_shed_mw
-                ? overview.total_load_mw + liveSession.total_load_shed_mw
-                : overview.total_load_mw
-            }
+            totalLoad={overview.total_load_mw}
             totalCapacity={overview.total_capacity_mw}
           />
         </aside>

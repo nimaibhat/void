@@ -14,11 +14,30 @@ import { sendRLUSDPayout } from "@/lib/xrpl";
 
 export async function POST(req: NextRequest) {
   try {
-    const { householdId } = await req.json();
+    const body = await req.json();
+    const { householdId, address, seed, amount } = body;
 
+    // New format: direct payout with address, seed, and amount
+    if (address && amount) {
+      // Send RLUSD on XRPL
+      const txResult = await sendRLUSDPayout({
+        destination: address,
+        amount: amount,
+      });
+
+      const txHash = txResult.result.hash ?? "unknown";
+
+      return NextResponse.json({
+        ok: true,
+        message: `Payout of $${amount} RLUSD sent.`,
+        txHash,
+      });
+    }
+
+    // Old format: householdId (for backwards compatibility)
     if (!householdId) {
       return NextResponse.json(
-        { ok: false, error: "householdId is required." },
+        { ok: false, error: "householdId or address+amount is required." },
         { status: 400 }
       );
     }

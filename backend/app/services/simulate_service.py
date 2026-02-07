@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from app.services import demand_service
+from app.services import demand_service, overview_service
 from app.services.cascade_service import run_cascade
 from app.services.grid_graph_service import grid_graph
 
@@ -48,12 +48,34 @@ async def run_cascade_simulation(
         scenario=resolved_scenario, forecast_hour=forecast_hour
     )
 
+    # Get weather data for cold-weather failure simulation (Uri scenario)
+    # This enables realistic infrastructure failures during extreme cold events
+    weather_by_zone = None
+    if resolved_scenario in ("uri", "uri_2021") or resolved_scenario.startswith("uri"):
+        # Normalize scenario name for overview service (only understands "uri")
+        overview_scenario = "uri"
+        logger.info(
+            f"Fetching weather data for {resolved_scenario} scenario "
+            f"(using '{overview_scenario}' for overview) to simulate cold-weather failures"
+        )
+        overview = overview_service.get_overview(overview_scenario)
+        weather_by_zone = {
+            r.name: {
+                "temp_f": r.weather.temp_f,
+                "wind_mph": r.weather.wind_mph,
+                "is_extreme": r.weather.is_extreme,
+            }
+            for r in overview.regions
+        }
+        logger.info(f"Weather data loaded for {len(weather_by_zone)} zones from '{overview_scenario}' overview")
+
     # Run the cascade simulation on a deep copy of the grid
     result = run_cascade(
         graph=grid_graph.graph,
         demand_multipliers=multipliers,
         scenario_label=f"{region.lower()}_{resolved_scenario}",
         forecast_hour=forecast_hour,
+        weather_by_zone=weather_by_zone,
     )
 
     return result

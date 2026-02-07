@@ -280,18 +280,14 @@ export default function EnhancedSmartDevicesPanel({
         // Save enodeUserId
         onEnodeUserIdChange(userId);
 
-        // Persist to Supabase
+        // Persist to consumer_profiles via API
         if (profileId) {
           try {
-            const { createClient } = await import("@supabase/supabase-js");
-            const supabase = createClient(
-              process.env.NEXT_PUBLIC_SUPABASE_URL!,
-              process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
-            );
-            await supabase
-              .from("consumer_profiles")
-              .update({ enode_user_id: userId })
-              .eq("id", profileId);
+            await fetch("/api/profile/update-enode", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ profileId, enodeUserId: userId }),
+            });
           } catch {
             /* non-critical */
           }
@@ -335,24 +331,7 @@ export default function EnhancedSmartDevicesPanel({
     }
   };
 
-  // Try to match an Enode device to a dashboard device by type
-  const getEnodeMatch = (device: DashboardDevice): DeviceInfo | undefined => {
-    if (!device.type) return undefined;
-    const enodeType = ENODE_TYPE_MAP[device.type];
-    if (!enodeType) return undefined;
-    return enodeDevices.find((ed) => ed.deviceType === enodeType);
-  };
-
-  if (!devices.length) {
-    return (
-      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px] flex items-center justify-center">
-        <span className="text-sm text-[#555] font-mono">
-          No smart devices connected
-        </span>
-      </div>
-    );
-  }
-
+  // Only show Enode devices, no hardcoded devices from database
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -391,94 +370,47 @@ export default function EnhancedSmartDevicesPanel({
         </div>
       </div>
 
-      {/* Device list */}
-      <div className="space-y-3">
-        {devices.map((d, i) => {
-          const enodeMatch = getEnodeMatch(d);
-
-          return (
+      {/* Show message if no devices connected */}
+      {!enodeUserId || enodeDevices.length === 0 ? (
+        <div className="flex items-center justify-center min-h-[180px]">
+          <div className="text-center">
+            <span className="text-sm text-[#555] font-mono block mb-2">
+              {!enodeUserId
+                ? "No devices connected"
+                : "No Enode devices found"}
+            </span>
+            {!enodeUserId && (
+              <span className="text-xs text-[#444] font-mono">
+                Click "Connect Devices" to link your smart devices
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Device list - only show Enode devices */
+        <div className="space-y-3">
+          {enodeDevices.map((ed) => (
             <div
-              key={i}
+              key={ed.id}
               className="p-3 rounded-lg bg-[#0a0a0a] border border-[#1a1a1a] hover:border-[#22c55e]/20 transition-all"
             >
-              <div className="flex items-center gap-3">
-                <span className="text-xl flex-shrink-0">{d.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white truncate">
-                      {d.name}
-                    </span>
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        STATUS_COLORS[d.status] ?? "bg-[#52525b]"
-                      }`}
-                    />
-                  </div>
-                  {(d.brand || d.model) && (
-                    <span className="text-[10px] font-mono text-white/25">
-                      {d.brand}
-                      {d.model ? ` · ${d.model}` : ""}
-                    </span>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="text-xs text-[#71717a]">{d.value}</span>
-                  <span className="block text-[9px] text-[#52525b] capitalize">
-                    {d.status}
-                  </span>
-                </div>
-              </div>
-
-              {/* Enode overlay if we have a match */}
-              {enodeMatch && (
-                <EnodeDeviceOverlay
-                  enodeDevice={enodeMatch}
-                  onAction={handleDeviceAction}
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    ed.isReachable ? "bg-[#22c55e]" : "bg-red-400"
+                  }`}
                 />
-              )}
+                <span className="text-sm font-medium text-white">
+                  {ed.information?.brand ?? ed.vendor}{" "}
+                  {ed.information?.model ?? ed.deviceType}
+                </span>
+              </div>
+              <EnodeDeviceOverlay
+                enodeDevice={ed}
+                onAction={handleDeviceAction}
+              />
             </div>
-          );
-        })}
-      </div>
-
-      {/* Enode-only devices (connected but not in static list) */}
-      {enodeDevices.filter(
-        (ed) =>
-          !devices.some((d) => d.type && ENODE_TYPE_MAP[d.type] === ed.deviceType)
-      ).length > 0 && (
-        <div className="mt-4 pt-4 border-t border-white/[0.06]">
-          <span className="text-[10px] font-mono text-white/25 uppercase tracking-widest block mb-2">
-            Additional Enode Devices
-          </span>
-          {enodeDevices
-            .filter(
-              (ed) =>
-                !devices.some(
-                  (d) => d.type && ENODE_TYPE_MAP[d.type] === ed.deviceType
-                )
-            )
-            .map((ed) => (
-              <div
-                key={ed.id}
-                className="p-3 rounded-lg bg-[#0a0a0a] border border-[#1a1a1a] mb-2"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      ed.isReachable ? "bg-[#22c55e]" : "bg-red-400"
-                    }`}
-                  />
-                  <span className="text-xs font-mono text-white/70">
-                    {ed.information?.brand ?? ed.vendor}{" "}
-                    {ed.information?.model ?? ed.deviceType}
-                  </span>
-                </div>
-                <EnodeDeviceOverlay
-                  enodeDevice={ed}
-                  onAction={handleDeviceAction}
-                />
-              </div>
-            ))}
+          ))}
         </div>
       )}
     </motion.div>

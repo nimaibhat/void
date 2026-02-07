@@ -6,15 +6,44 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-from app.services import demand_service
+from app.services import demand_service, overview_service
 from app.services.cascade_service import run_cascade
 from app.services.grid_graph_service import grid_graph
 
 logger = logging.getLogger("blackout.grid_service")
 
 DEFAULT_FORECAST_HOUR = 36
+
+# Cache for cascade results: (scenario, forecast_hour) -> cascade_result
+_cascade_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+
+def prewarm_cascade_cache() -> None:
+    """Pre-compute cascade probabilities for common scenarios on startup.
+
+    This makes the first API calls instant instead of waiting 1-2s for simulation.
+    Runs in background, doesn't block startup.
+    """
+    import asyncio
+
+    async def _prewarm():
+        logger.info("Pre-warming cascade probability cache...")
+        scenarios_to_cache = [
+            ("uri", 36),      # Uri peak crisis
+            ("normal", 12),   # Normal midday
+            ("live", 36),     # Live forecast
+        ]
+        for scenario, hour in scenarios_to_cache:
+            try:
+                await get_cascade_probability(scenario, hour)
+            except Exception as e:
+                logger.warning(f"Failed to prewarm {scenario} h={hour}: {e}")
+        logger.info(f"Cascade cache pre-warmed with {len(_cascade_cache)} entries")
+
+    # Run async in background (don't await)
+    asyncio.create_task(_prewarm())
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -148,48 +177,63 @@ async def get_cascade_probability(
     scenario: str = "uri_2021",
     forecast_hour: int = DEFAULT_FORECAST_HOUR,
 ) -> Dict[str, Any]:
-    """Cascade probability for ERCOT from real load data."""
-    multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
+    """Cascade probability from REAL cascade simulation (cached).
 
-    total = 0
-    above_80 = 0
-    above_95 = 0
-    total_stress = 0.0
-    for nid in grid_graph.get_node_ids():
-        nd = grid_graph.graph.nodes[nid]
-        load = nd["base_load_mw"] * multipliers.get(nid, 1.0)
-        cap = nd["capacity_mw"]
-        pct = (load / cap * 100) if cap > 0 else 0
-        total += 1
-        if pct > 80:
-            above_80 += 1
-            # Weight by how far above 80% — a node at 120% is much worse than 82%
-            total_stress += min((pct - 80) / 20, 3.0)
-        if pct > 95:
-            above_95 += 1
+    Runs the actual cascade simulation to get the TRUE failure rate,
+    not a heuristic estimate. Results are cached per (scenario, forecast_hour).
+    """
+    cache_key = (scenario, forecast_hour)
 
-    if total == 0:
-        ercot_prob = 0.0
+    # Check cache first
+    if cache_key in _cascade_cache:
+        cached = _cascade_cache[cache_key]
+        ercot_prob = cached["total_failed_nodes"] / max(cached["total_nodes"], 1)
+        logger.debug(
+            f"Cascade probability (cached): {ercot_prob:.1%} "
+            f"({cached['total_failed_nodes']}/{cached['total_nodes']} nodes failed)"
+        )
     else:
-        # Non-linear cascade probability:
-        # Even a small fraction of critically stressed nodes causes cascade risk
-        # because failed nodes redistribute load to neighbors
-        stressed_frac = above_80 / total
-        critical_frac = above_95 / total
-        avg_overstress = total_stress / max(above_80, 1)
+        # Run actual cascade simulation
+        logger.info(f"Running cascade simulation for {scenario} h={forecast_hour} (not cached)")
+        multipliers = demand_service.compute_demand_multipliers(scenario, forecast_hour)
 
-        # Base: sigmoid-like curve where 10% stressed → ~50%, 20% → ~80%, 30% → ~95%
-        base_prob = 1.0 - 1.0 / (1.0 + (stressed_frac / 0.12) ** 2.5)
-        # Boost from critically overloaded nodes (>95%)
-        critical_boost = min(critical_frac * 5, 0.3)
-        # Boost from severity of overstress
-        severity_boost = min(avg_overstress * 0.1, 0.15)
+        # Get weather data for cold-weather failure simulation (Uri scenario)
+        weather_by_zone = None
+        if scenario in ("uri", "uri_2021"):
+            overview = overview_service.get_overview(scenario)
+            weather_by_zone = {
+                r.name: {
+                    "temp_f": r.weather.temp_f,
+                    "wind_mph": r.weather.wind_mph,
+                    "is_extreme": r.weather.is_extreme,
+                }
+                for r in overview.regions
+            }
 
-        ercot_prob = round(min(base_prob + critical_boost + severity_boost, 1.0), 2)
+        cascade_result = run_cascade(
+            graph=grid_graph.graph,
+            demand_multipliers=multipliers,
+            scenario_label=f"{scenario}_cascade_prob",
+            forecast_hour=forecast_hour,
+            weather_by_zone=weather_by_zone,
+        )
+
+        # Cache the result
+        _cascade_cache[cache_key] = cascade_result
+
+        # Calculate actual failure rate
+        ercot_prob = cascade_result["total_failed_nodes"] / max(cascade_result["total_nodes"], 1)
+        logger.info(
+            f"Cascade simulation complete: {ercot_prob:.1%} failure rate "
+            f"({cascade_result['total_failed_nodes']}/{cascade_result['total_nodes']} nodes, "
+            f"{cascade_result['cascade_depth']} steps, "
+            f"{cascade_result['total_load_shed_mw']:.0f} MW shed)"
+        )
 
     return {
         "probabilities": {
-            "ERCOT": ercot_prob,
+            "ERCOT": round(ercot_prob, 3),
+            # Other ISOs remain placeholders (no real grid data)
             "WECC": 0.12,
             "PJM": 0.18,
             "NYISO": 0.05,

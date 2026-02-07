@@ -10,6 +10,7 @@ from app.routers import consumer, forecast, grid, orchestrate, simulate, utility
 from app.schemas.responses import ErrorResponse
 from app.services.ercot_data_service import ercot_data
 from app.services.grid_graph_service import grid_graph
+from app.services.grid_service import prewarm_cascade_cache
 from app.services.price_service import price_service
 from app.services.weather_service import weather_service
 
@@ -21,6 +22,10 @@ async def lifespan(app: FastAPI):
     ercot_data.load()
     await weather_service.load_model()
     await price_service.load_model()
+
+    # Pre-warm cascade probability cache (runs in background)
+    prewarm_cascade_cache()
+
     yield
     # Shutdown: nothing to clean up — model memory freed automatically.
 

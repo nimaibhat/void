@@ -8,6 +8,7 @@ import { motion } from "framer-motion";
 /* ------------------------------------------------------------------ */
 interface XRPLWalletPanelProps {
   householdId: string | null;
+  profileId?: string | null;
   onWalletChange?: () => void;
 }
 
@@ -31,6 +32,7 @@ interface PayoutEntry {
 /* ------------------------------------------------------------------ */
 export default function XRPLWalletPanel({
   householdId,
+  profileId,
   onWalletChange,
 }: XRPLWalletPanelProps) {
   const [setupStep, setSetupStep] = useState<SetupStep>("none");
@@ -48,53 +50,67 @@ export default function XRPLWalletPanel({
 
   // Check balance / status
   const checkBalance = useCallback(async () => {
-    if (!householdId) return;
+    if (!profileId || !walletInfo) return;
     try {
-      const res = await fetch(
-        `/api/xrpl/status?householdId=${encodeURIComponent(householdId)}`
+      // Get XRPL balance
+      const balRes = await fetch(
+        `/api/xrpl/status?address=${encodeURIComponent(walletInfo.address)}`
       );
-      const data = await res.json();
-      if (data.ok) {
-        if (data.balances) setBalance(data.balances.RLUSD ?? "0");
-        if (data.pendingSavings != null) setPendingSavings(data.pendingSavings);
-        if (data.paidTotal != null) setPaidTotal(data.paidTotal);
-        if (data.payoutHistory) setPayoutHistory(data.payoutHistory);
+      const balData = await balRes.json();
+      if (balData.ok && balData.balances) {
+        setBalance(balData.balances.RLUSD ?? "0");
+      }
+
+      // Get profile savings data
+      const profRes = await fetch(
+        `/api/xrpl/profile?profileId=${encodeURIComponent(profileId)}`
+      );
+      const profData = await profRes.json();
+      if (profData.ok && profData.wallet) {
+        setPendingSavings(profData.wallet.savingsUsdPending || 0);
+        setPaidTotal(profData.wallet.savingsUsdPaid || 0);
+      }
+      if (profData.payouts) {
+        setPayoutHistory(profData.payouts);
       }
     } catch {
       /* silent */
     }
-  }, [householdId]);
+  }, [profileId, walletInfo]);
 
-  // Check initial state from simulation API
+  // Load initial wallet state from profile
   useEffect(() => {
-    if (!householdId) return;
+    if (!profileId) return;
+
     (async () => {
       try {
-        const res = await fetch("/api/simulation");
+        const res = await fetch(`/api/xrpl/profile?profileId=${encodeURIComponent(profileId)}`);
         const data = await res.json();
-        if (data.ok) {
-          const hh = (data.households ?? []).find(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (h: any) => h.id === householdId
-          );
-          if (hh?.xrplWallet) {
-            setWalletInfo({
-              address: hh.xrplWallet.address,
-              seed: hh.xrplWallet.seed,
-            });
-            setSetupStep(
-              hh.xrplWallet.trustLineCreated ? "ready" : "linked"
-            );
-            if (hh.savingsUSD_pending != null)
-              setPendingSavings(hh.savingsUSD_pending);
-            if (hh.savingsUSD_paid != null) setPaidTotal(hh.savingsUSD_paid);
-          }
+
+        if (!data.ok) {
+          console.error("Failed to load XRPL profile:", data.error);
+          setError(data.error || "Failed to load wallet data");
+          return;
         }
-      } catch {
-        /* silent */
+
+        if (data.wallet) {
+          setWalletInfo({
+            address: data.wallet.address,
+            seed: data.wallet.seed,
+          });
+          setSetupStep(data.wallet.trustLineCreated ? "ready" : "linked");
+          setPendingSavings(data.wallet.savingsUsdPending || 0);
+          setPaidTotal(data.wallet.savingsUsdPaid || 0);
+        }
+        if (data.payouts) {
+          setPayoutHistory(data.payouts);
+        }
+      } catch (err) {
+        console.error("Exception loading XRPL profile:", err);
+        setError("Failed to load wallet data");
       }
     })();
-  }, [householdId]);
+  }, [profileId]);
 
   // Poll balance when ready
   useEffect(() => {
@@ -146,18 +162,19 @@ export default function XRPLWalletPanel({
     setLoading(false);
   };
 
-  // Step 2: Link to household
+  // Step 2: Link to profile
   const handleLink = async () => {
-    if (!walletInfo || !householdId) return;
+    if (!walletInfo || !profileId) return;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/xrpl/setup", {
+      // Save wallet to profile
+      const res = await fetch("/api/xrpl/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "link",
-          householdId,
+          action: "saveWallet",
+          profileId,
           address: walletInfo.address,
           seed: walletInfo.seed,
         }),
@@ -177,24 +194,41 @@ export default function XRPLWalletPanel({
 
   // Step 3: Create trust line
   const handleTrustline = async () => {
-    if (!householdId) return;
+    if (!profileId || !walletInfo) return;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/xrpl/setup", {
+      // Create trust line on XRPL
+      const trustRes = await fetch("/api/xrpl/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "trustline",
-          householdId,
+          seed: walletInfo.seed,
         }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const trustData = await trustRes.json();
+      if (!trustData.ok) {
+        setError(trustData.error);
+        setLoading(false);
+        return;
+      }
+
+      // Mark trust line as created in profile
+      const markRes = await fetch("/api/xrpl/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "markTrustLine",
+          profileId,
+        }),
+      });
+      const markData = await markRes.json();
+      if (markData.ok) {
         setSetupStep("ready");
         onWalletChange?.();
       } else {
-        setError(data.error);
+        setError(markData.error);
       }
     } catch {
       setError("Failed to create trust line");
@@ -204,21 +238,38 @@ export default function XRPLWalletPanel({
 
   // Manual payout
   const handleManualPayout = async () => {
-    if (!householdId) return;
+    if (!profileId || !walletInfo) return;
     setLoading(true);
     setError("");
     try {
+      // Execute payout on XRPL
       const res = await fetch("/api/xrpl/payout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ householdId }),
+        body: JSON.stringify({
+          address: walletInfo.address,
+          seed: walletInfo.seed,
+          amount: pendingSavings.toFixed(2),
+        }),
       });
       const data = await res.json();
-      if (data.ok) {
+      if (data.ok && data.txHash) {
+        // Record payout in profile
+        await fetch("/api/xrpl/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "recordPayout",
+            profileId,
+            amount: pendingSavings.toFixed(2),
+            txHash: data.txHash,
+          }),
+        });
+
         onWalletChange?.();
         await checkBalance();
       } else {
-        setError(data.error);
+        setError(data.error || "Payout failed");
       }
     } catch {
       setError("Payout failed");
@@ -226,7 +277,7 @@ export default function XRPLWalletPanel({
     setLoading(false);
   };
 
-  if (!householdId) {
+  if (!profileId) {
     return (
       <motion.div
         initial={{ opacity: 0, y: 16 }}
@@ -238,7 +289,7 @@ export default function XRPLWalletPanel({
           XRPL Rewards
         </h3>
         <p className="text-sm text-[#555] font-mono">
-          Household mapping unavailable. Load a citizen profile to enable XRPL rewards.
+          Profile ID unavailable. Load a profile to enable XRPL rewards.
         </p>
       </motion.div>
     );
@@ -298,7 +349,7 @@ export default function XRPLWalletPanel({
             disabled={loading}
             className="text-sm font-mono py-2.5 px-5 rounded-lg border border-purple-400/30 text-purple-400/70 bg-purple-400/[0.04] hover:bg-purple-400/[0.12] hover:text-purple-400 transition-all cursor-pointer disabled:opacity-30"
           >
-            {loading ? "Linking..." : "2. Link to Household"}
+            {loading ? "Linking..." : "2. Link to Profile"}
           </button>
         </div>
       )}
