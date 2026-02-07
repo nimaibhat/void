@@ -1,14 +1,148 @@
-"""Events Service — pre-generated Winter Storm Uri timeline events for the operator live feed."""
+"""Events Service — reads alerts from Supabase ``live_alerts`` table,
+falls back to hardcoded Winter Storm Uri timeline for the ``uri`` scenario.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import AsyncGenerator, List
+import logging
+from typing import Any, AsyncGenerator, Dict, List
 
+import requests
+
+from app.config import settings
 from app.models.utility import EventSeverity, TimelineEvent
 
-# ── Uri timeline events (T+0 = cold front arrival, Feb 14 2021 ~02:00 CT) ──
+logger = logging.getLogger("blackout.events")
+
+# ── Supabase helpers ────────────────────────────────────────────────
+
+
+def _supabase_headers() -> Dict[str, str]:
+    key = settings.supabase_anon_key
+    return {"apikey": key, "Authorization": f"Bearer {key}"}
+
+
+def _fetch_alerts() -> List[Dict[str, Any]]:
+    """Fetch all rows from the ``live_alerts`` table, paginated."""
+    url = settings.supabase_url
+    headers = _supabase_headers()
+    page_size = 1000
+    offset = 0
+    all_rows: List[Dict[str, Any]] = []
+
+    while True:
+        api_url = (
+            f"{url}/rest/v1/live_alerts"
+            f"?select=*&order=created_at&limit={page_size}&offset={offset}"
+        )
+        resp = requests.get(api_url, headers=headers, timeout=30)
+        if not resp.ok:
+            logger.error(
+                "Supabase live_alerts fetch failed (%s): %s",
+                resp.status_code, resp.text[:200],
+            )
+            break
+        rows = resp.json()
+        if not rows:
+            break
+        all_rows.extend(rows)
+        offset += page_size
+        if len(rows) < page_size:
+            break
+
+    return all_rows
+
+
+def _rows_to_events(rows: List[Dict[str, Any]]) -> List[TimelineEvent]:
+    """Convert Supabase ``live_alerts`` rows to ``TimelineEvent`` objects.
+
+    Maps:
+      id           → event_id
+      created_at   → timestamp_offset_minutes (relative to earliest alert)
+      title        → title
+      description  → description
+      severity     → severity
+      grid_region  → region
+      metadata.affected_nodes → affected_nodes (default 0)
+    """
+    if not rows:
+        return []
+
+    # Sort by created_at so offsets are chronological
+    rows.sort(key=lambda r: r.get("created_at", ""))
+
+    # Compute offset relative to the first alert
+    from datetime import datetime, timezone
+
+    def _parse_ts(ts_str: str) -> datetime:
+        # Handle Supabase ISO timestamps (may or may not have timezone)
+        ts_str = ts_str.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(ts_str)
+        except ValueError:
+            return datetime.now(timezone.utc)
+
+    base_ts = _parse_ts(rows[0]["created_at"])
+
+    events: List[TimelineEvent] = []
+    for r in rows:
+        ts = _parse_ts(r.get("created_at", ""))
+        offset_minutes = max(0, int((ts - base_ts).total_seconds() / 60))
+
+        # Extract affected_nodes from metadata JSON if present
+        metadata = r.get("metadata") or {}
+        if isinstance(metadata, str):
+            import json
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        affected = int(metadata.get("affected_nodes", 0))
+
+        # Map severity — live_alerts may use different casing
+        raw_severity = (r.get("severity") or "info").lower()
+        if raw_severity not in ("info", "warning", "critical", "emergency"):
+            raw_severity = "info"
+
+        events.append(TimelineEvent(
+            event_id=str(r.get("id", "")),
+            timestamp_offset_minutes=offset_minutes,
+            title=r.get("title", "Alert"),
+            description=r.get("description", ""),
+            severity=EventSeverity(raw_severity),
+            region=r.get("grid_region"),
+            affected_nodes=affected,
+        ))
+
+    return events
+
+
+# ── Cached Supabase data ────────────────────────────────────────────
+
+_cached_events: List[TimelineEvent] | None = None
+
+
+def _load_from_supabase() -> List[TimelineEvent]:
+    """Load alerts from Supabase and cache them."""
+    global _cached_events
+    url = settings.supabase_url
+    key = settings.supabase_anon_key
+    if not url or not key:
+        logger.warning("Supabase not configured — events will use hardcoded fallback")
+        return []
+
+    rows = _fetch_alerts()
+    if rows:
+        _cached_events = _rows_to_events(rows)
+        logger.info("Loaded %d events from Supabase live_alerts", len(_cached_events))
+        return _cached_events
+
+    logger.warning("No rows in live_alerts — using hardcoded fallback")
+    return []
+
+
+# ── Hardcoded fallbacks ─────────────────────────────────────────────
 
 _URI_EVENTS: List[dict] = [
     {
@@ -233,10 +367,32 @@ _NORMAL_EVENTS: List[dict] = [
 ]
 
 
+# ── Public API (same interface as before) ───────────────────────────
+
+
 def get_events(scenario: str = "uri") -> List[TimelineEvent]:
-    """Return pre-generated timeline events for the given scenario."""
-    raw = _URI_EVENTS if scenario == "uri" else _NORMAL_EVENTS
-    return [TimelineEvent(**e) for e in raw]
+    """Return timeline events for the given scenario.
+
+    - ``uri``    → hardcoded Winter Storm Uri timeline (rich 20-event story)
+    - ``normal`` → hardcoded normal-ops events
+    - ``live``   → real alerts from Supabase ``live_alerts`` table
+    """
+    if scenario == "uri":
+        return [TimelineEvent(**e) for e in _URI_EVENTS]
+    if scenario == "normal":
+        return [TimelineEvent(**e) for e in _NORMAL_EVENTS]
+
+    # "live" or any other scenario → try Supabase
+    global _cached_events
+    if _cached_events is not None:
+        return list(_cached_events)
+
+    events = _load_from_supabase()
+    if events:
+        return events
+
+    # Ultimate fallback: normal events
+    return [TimelineEvent(**e) for e in _NORMAL_EVENTS]
 
 
 async def stream_events(scenario: str = "uri") -> AsyncGenerator[str, None]:

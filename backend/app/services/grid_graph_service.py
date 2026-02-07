@@ -71,7 +71,7 @@ def _fetch_all_rows(table: str, select: str = "*") -> List[Dict[str, Any]]:
     """Fetch all rows from a Supabase table, paginating as needed."""
     url = settings.supabase_url
     headers = _supabase_headers()
-    page_size = 5000
+    page_size = 1000
     offset = 0
     all_rows: List[Dict[str, Any]] = []
 

@@ -25,6 +25,14 @@ const SCENARIOS = [
     badgeColor: "text-[#22c55e]/70",
     icon: "🟢",
   },
+  {
+    id: "live",
+    label: "live weather forecast",
+    desc: "real-time 48h weather → ml demand prediction → cascade probability",
+    badge: "LIVE",
+    badgeColor: "text-[#3b82f6]/70",
+    icon: "🔵",
+  },
 ];
 
 /* Texas zip code → ERCOT weather zone (approximate) */

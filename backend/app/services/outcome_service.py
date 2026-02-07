@@ -31,33 +31,15 @@ def _count_affected_zones(failed_ids: list[str]) -> int:
 def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     """Run cascade with and without Blackout optimization, compare results."""
 
-    if scenario != "uri":
-        normal_outcome = ScenarioOutcome(
-            scenario_name="Without Blackout",
-            total_affected_customers=0,
-            peak_price_mwh=_NORMAL_PRICE_MWH,
-            blackout_duration_hours=0.0,
-            regions_affected=0,
-            cascade_steps=0,
-            failed_nodes=0,
-        )
-        return OutcomeComparison(
-            without_blackout=normal_outcome,
-            with_blackout=normal_outcome,
-            customers_saved=0,
-            price_reduction_pct=0.0,
-            cascade_reduction_pct=0.0,
-        )
-
-    # ── Without Blackout: full Uri demand, no mitigation ────────────
+    # ── Without Blackout: full demand, no mitigation ─────────────────
     multipliers_raw = demand_service.compute_demand_multipliers(
-        scenario="uri", forecast_hour=36
+        scenario=scenario, forecast_hour=36
     )
 
     result_without = run_cascade(
         graph=grid_graph.graph,
         demand_multipliers=multipliers_raw,
-        scenario_label="uri_no_mitigation",
+        scenario_label=f"{scenario}_no_mitigation",
         forecast_hour=36,
     )
 
@@ -75,7 +57,7 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     result_with = run_cascade(
         graph=grid_graph.graph,
         demand_multipliers=multipliers_mitigated,
-        scenario_label="uri_with_blackout",
+        scenario_label=f"{scenario}_with_blackout",
         forecast_hour=36,
     )
 
@@ -86,7 +68,16 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     steps_with = result_with["cascade_depth"]
 
     # ── Price impact ────────────────────────────────────────────────
-    price_with = round(_URI_PEAK_PRICE_MWH * 0.55, 2)
+    # Uri: $9000 peak without, 55% reduction with mitigation
+    # Normal/Live: use proportional to failure ratio
+    if scenario == "uri":
+        price_without = _URI_PEAK_PRICE_MWH
+        price_with = round(_URI_PEAK_PRICE_MWH * 0.55, 2)
+    else:
+        # Scale from normal price based on failure severity
+        failure_ratio = failed_without / max(result_without["total_nodes"], 1)
+        price_without = round(_NORMAL_PRICE_MWH * (1 + failure_ratio * 50), 2)
+        price_with = round(price_without * (failed_with / max(failed_without, 1)), 2)
 
     # ── Blackout duration ───────────────────────────────────────────
     duration_without = 48.0
@@ -96,7 +87,7 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
     without = ScenarioOutcome(
         scenario_name="Without Blackout",
         total_affected_customers=customers_without,
-        peak_price_mwh=_URI_PEAK_PRICE_MWH,
+        peak_price_mwh=price_without,
         blackout_duration_hours=duration_without,
         regions_affected=regions_without,
         cascade_steps=steps_without,
@@ -115,8 +106,8 @@ def get_outcomes(scenario: str = "uri") -> OutcomeComparison:
 
     customers_saved = max(0, customers_without - customers_with)
     price_reduction = round(
-        (1 - price_with / _URI_PEAK_PRICE_MWH) * 100, 1
-    ) if _URI_PEAK_PRICE_MWH > 0 else 0.0
+        (1 - price_with / price_without) * 100, 1
+    ) if price_without > 0 else 0.0
     cascade_reduction = round(
         (1 - steps_with / max(steps_without, 1)) * 100, 1
     )

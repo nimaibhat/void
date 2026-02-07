@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 
 
 class CascadeRequest(BaseModel):
+    scenario: str = Field(
+        default="uri",
+        examples=["uri", "normal", "live"],
+        description="Scenario name — uri, normal, or live",
+    )
     start_time: str = Field(
         default="2021-02-13T00:00:00",
         examples=["2021-02-13T00:00:00"],
-        description="ISO datetime for the weather scenario",
+        description="ISO datetime for the weather scenario (legacy, overridden by scenario)",
     )
     forecast_hour: int = Field(
         default=36,

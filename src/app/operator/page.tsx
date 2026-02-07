@@ -544,10 +544,11 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
     return <LoadingSkeleton />;
   }
 
-  const scenarioLabel =
-    scenario === "uri"
-      ? "Winter Storm Uri — Feb 13, 2021 T-48h"
-      : "Normal Operations — Feb 1, 2021";
+  const scenarioLabel = {
+    uri: "Winter Storm Uri — Feb 13, 2021 T-48h",
+    normal: "Normal Operations — Feb 1, 2021",
+    live: "Live Weather Simulation",
+  }[scenario];
 
   return (
     <div className="h-screen w-screen bg-[#0a0a0a] flex flex-col overflow-hidden">
@@ -683,6 +684,8 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
       <CascadeOverlay
         isOpen={isCascadeOpen}
         onClose={() => setIsCascadeOpen(false)}
+        scenario={scenario}
+        forecastHour={36}
       />
 
       {/* EIA Data Panel */}
