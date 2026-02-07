@@ -4,14 +4,19 @@
  * Lightweight endpoint called directly by ntfy action buttons
  * from the iOS notification (no browser, no POST body needed).
  * After processing, sends a confirmation push notification back.
+ * Also triggers XRPL payout if savings threshold is met.
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
   acceptRecommendation,
   declineRecommendation,
+  isPayoutReady,
+  checkAndRecordPayout,
+  PAYOUT_THRESHOLD_USD,
 } from "@/lib/simulation";
 import { controlHvac } from "@/lib/enode";
 import { sendPushNotification } from "@/lib/notify";
+import { sendRLUSDPayout } from "@/lib/xrpl";
 
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
@@ -28,7 +33,6 @@ export async function GET(req: NextRequest) {
     if (action === "DECLINE") {
       const result = declineRecommendation(id);
 
-      // Send confirmation push (no image attachment for quick confirmations)
       await sendPushNotification({
         title: "Recommendation Declined",
         message: `No changes made. Your thermostat stays at ${result.household.hvac.setpoint}°C.`,
@@ -42,24 +46,28 @@ export async function GET(req: NextRequest) {
 
     // ACCEPT
     const result = acceptRecommendation(id);
+    const hh = result.household;
 
-    // Send confirmation push (no image attachment for quick confirmations)
+    // Send confirmation push with savings info
     await sendPushNotification({
       title: "✅ Thermostat Adjusted!",
       message:
         `Set to ${result.recommendation.recommendedSetpoint}°C\n` +
         `+${result.recommendation.estimatedCredits} credits earned\n` +
-        `Total: ${result.household.credits} credits`,
+        `💵 +$${result.recommendation.estimatedSavingsUSD.toFixed(2)} savings` +
+        (hh.savingsUSD_pending >= PAYOUT_THRESHOLD_USD
+          ? ` — RLUSD payout sending!`
+          : ` (total pending: $${hh.savingsUSD_pending.toFixed(2)})`),
       priority: 3,
       tags: ["white_check_mark", "thermometer"],
       noAttach: true,
     });
 
     // If backed by a real Enode device, also send the command
-    if (result.needsEnodeCall && result.household.enodeHvacId) {
+    if (result.needsEnodeCall && hh.enodeHvacId) {
       try {
-        await controlHvac(result.household.enodeHvacId, {
-          mode: result.household.hvac.mode,
+        await controlHvac(hh.enodeHvacId, {
+          mode: hh.hvac.mode,
           heatSetpoint: result.recommendation.recommendedSetpoint,
         });
       } catch {
@@ -67,11 +75,35 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── Auto-payout RLUSD if threshold reached ──────────────
+    if (isPayoutReady(hh.id)) {
+      try {
+        const payoutAmount = +hh.savingsUSD_pending.toFixed(2);
+        const txResult = await sendRLUSDPayout({
+          destination: hh.xrplWallet!.address,
+          amount: payoutAmount.toFixed(2),
+        });
+        checkAndRecordPayout(hh.id, txResult.hash);
+
+        await sendPushNotification({
+          title: "💰 RLUSD Payout Sent!",
+          message:
+            `$${payoutAmount.toFixed(2)} RLUSD → your wallet!\n` +
+            `TX: ${txResult.hash.slice(0, 16)}…\n` +
+            `Total earned: $${hh.savingsUSD_paid.toFixed(2)} RLUSD`,
+          priority: 4,
+          tags: ["moneybag", "rocket"],
+          noAttach: true,
+        });
+      } catch (payoutErr) {
+        console.error("[XRPL] Quick-respond payout failed:", payoutErr);
+      }
+    }
+
     return NextResponse.json({ ok: true, status: "ACCEPTED" });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // Send error push so user knows something went wrong
     await sendPushNotification({
       title: "⚠️ Action Failed",
       message: message.includes("already")

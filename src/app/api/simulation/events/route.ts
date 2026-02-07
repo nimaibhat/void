@@ -66,7 +66,8 @@ export async function POST(req: NextRequest) {
       const message =
         `${martinezRec.reason}\n\n` +
         `🌡️ Current: ${martinezRec.currentSetpoint}°C → Recommended: ${martinezRec.recommendedSetpoint}°C\n` +
-        `🏆 Earn +${martinezRec.estimatedCredits} resilience credits`;
+        `🏆 Earn +${martinezRec.estimatedCredits} resilience credits\n` +
+        `💰 Save ~$${martinezRec.estimatedSavingsUSD.toFixed(2)} → RLUSD`;
 
       pushSent = await sendPushNotification({
         title: result.event.notificationTitle,

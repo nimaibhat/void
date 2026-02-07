@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import AlertsPanel from "@/components/AlertsPanel";
+import AlertsPanel, { type AlertData } from "@/components/AlertsPanel";
 import { supabase } from "@/lib/supabase";
+import type { HourlyPrice } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -319,13 +320,284 @@ function SeverityBadge({ severity }: { severity: number }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Placeholder section                                                */
+/*  Price Forecast Chart (48-hour SVG sparkline)                       */
 /* ------------------------------------------------------------------ */
-function PlaceholderSection({ label }: { label: string }) {
+function PriceForecastChart({
+  prices,
+  loading,
+}: {
+  prices: HourlyPrice[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px] flex items-center justify-center">
+        <span className="text-sm font-mono text-white/30 animate-pulse">
+          loading forecast...
+        </span>
+      </div>
+    );
+  }
+
+  if (!prices.length) {
+    return (
+      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px] flex items-center justify-center">
+        <span className="text-sm text-[#555] font-mono">
+          Price forecast unavailable
+        </span>
+      </div>
+    );
+  }
+
+  const W = 600;
+  const H = 180;
+  const PAD_X = 40;
+  const PAD_Y = 24;
+
+  const kwhPrices = prices.map((p) => p.consumer_price_kwh);
+  const maxP = Math.max(...kwhPrices, 0.3);
+  const minP = Math.min(...kwhPrices, 0);
+  const range = maxP - minP || 0.1;
+
+  const toX = (i: number) =>
+    PAD_X + (i / (prices.length - 1)) * (W - PAD_X * 2);
+  const toY = (v: number) =>
+    PAD_Y + (1 - (v - minP) / range) * (H - PAD_Y * 2);
+
+  // Build the main line path
+  const linePath = prices
+    .map((p, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(p.consumer_price_kwh).toFixed(1)}`)
+    .join(" ");
+
+  // Gradient fill area
+  const areaPath =
+    linePath +
+    ` L${toX(prices.length - 1).toFixed(1)},${(H - PAD_Y).toFixed(1)}` +
+    ` L${PAD_X.toFixed(1)},${(H - PAD_Y).toFixed(1)} Z`;
+
+  // Spike regions (>$0.25) and valley regions (<$0.08)
+  const spikeRects: { x: number; w: number }[] = [];
+  const valleyRects: { x: number; w: number }[] = [];
+
+  let spikeStart: number | null = null;
+  let valleyStart: number | null = null;
+
+  for (let i = 0; i < prices.length; i++) {
+    const kwh = prices[i].consumer_price_kwh;
+    if (kwh > 0.25) {
+      if (spikeStart === null) spikeStart = i;
+    } else if (spikeStart !== null) {
+      spikeRects.push({ x: toX(spikeStart), w: toX(i) - toX(spikeStart) });
+      spikeStart = null;
+    }
+    if (kwh < 0.08) {
+      if (valleyStart === null) valleyStart = i;
+    } else if (valleyStart !== null) {
+      valleyRects.push({ x: toX(valleyStart), w: toX(i) - toX(valleyStart) });
+      valleyStart = null;
+    }
+  }
+  if (spikeStart !== null)
+    spikeRects.push({ x: toX(spikeStart), w: toX(prices.length - 1) - toX(spikeStart) });
+  if (valleyStart !== null)
+    valleyRects.push({ x: toX(valleyStart), w: toX(prices.length - 1) - toX(valleyStart) });
+
+  // Stats
+  const avg = kwhPrices.reduce((a, b) => a + b, 0) / kwhPrices.length;
+  const peak = Math.max(...kwhPrices);
+  const low = Math.min(...kwhPrices);
+
+  // Y-axis labels
+  const yTicks = [minP, minP + range * 0.33, minP + range * 0.66, maxP];
+
   return (
-    <div className="rounded-xl border border-dashed border-[#333] bg-[#111111]/50 flex items-center justify-center min-h-[280px]">
-      <span className="text-sm text-[#555] font-mono">{label}</span>
-    </div>
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.25 }}
+      className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px]"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-white">
+          48-Hour Price Forecast
+        </h3>
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <span className="text-[#a1a1aa]">
+            Avg <span className="text-white">${avg.toFixed(2)}</span>
+          </span>
+          <span className="text-[#ef4444]">
+            Peak <span className="text-white">${peak.toFixed(2)}</span>
+          </span>
+          <span className="text-[#22c55e]">
+            Low <span className="text-white">${low.toFixed(2)}</span>
+          </span>
+        </div>
+      </div>
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full h-auto"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#22c55e" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Y-axis grid lines + labels */}
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line
+              x1={PAD_X}
+              y1={toY(v)}
+              x2={W - PAD_X}
+              y2={toY(v)}
+              stroke="#1a1a1a"
+              strokeWidth="1"
+            />
+            <text
+              x={PAD_X - 4}
+              y={toY(v) + 3}
+              textAnchor="end"
+              className="text-[8px] fill-[#52525b]"
+            >
+              ${v.toFixed(2)}
+            </text>
+          </g>
+        ))}
+
+        {/* Spike regions (red) */}
+        {spikeRects.map((r, i) => (
+          <rect
+            key={`spike-${i}`}
+            x={r.x}
+            y={PAD_Y}
+            width={Math.max(r.w, 2)}
+            height={H - PAD_Y * 2}
+            fill="rgba(239,68,68,0.08)"
+          />
+        ))}
+
+        {/* Valley regions (green) */}
+        {valleyRects.map((r, i) => (
+          <rect
+            key={`valley-${i}`}
+            x={r.x}
+            y={PAD_Y}
+            width={Math.max(r.w, 2)}
+            height={H - PAD_Y * 2}
+            fill="rgba(34,197,94,0.08)"
+          />
+        ))}
+
+        {/* Area fill */}
+        <path d={areaPath} fill="url(#priceGrad)" />
+
+        {/* Line */}
+        <path
+          d={linePath}
+          fill="none"
+          stroke="#22c55e"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+
+        {/* X-axis hour labels (every 6 hours) */}
+        {prices
+          .filter((_, i) => i % 6 === 0)
+          .map((p, i) => (
+            <text
+              key={i}
+              x={toX(p.hour)}
+              y={H - 4}
+              textAnchor="middle"
+              className="text-[8px] fill-[#52525b]"
+            >
+              {p.hour % 24 === 0
+                ? "12a"
+                : p.hour % 24 < 12
+                  ? `${p.hour % 24}a`
+                  : p.hour % 24 === 12
+                    ? "12p"
+                    : `${(p.hour % 24) - 12}p`}
+            </text>
+          ))}
+      </svg>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 mt-3 text-[10px] text-[#71717a]">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-sm bg-[rgba(239,68,68,0.3)]" />
+          Spike (&gt;$0.25)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-sm bg-[rgba(34,197,94,0.3)]" />
+          Valley (&lt;$0.08)
+        </span>
+        <span className="ml-auto font-mono text-[#52525b]">$/kWh</span>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Smart Devices Panel                                                */
+/* ------------------------------------------------------------------ */
+function SmartDevicesPanel({ devices }: { devices: Device[] }) {
+  if (!devices.length) {
+    return (
+      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px] flex items-center justify-center">
+        <span className="text-sm text-[#555] font-mono">
+          No smart devices connected
+        </span>
+      </div>
+    );
+  }
+
+  const statusColors: Record<string, string> = {
+    active: "bg-[#22c55e]",
+    scheduled: "bg-[#f59e0b]",
+    deferred: "bg-[#71717a]",
+    idle: "bg-[#52525b]",
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.3 }}
+      className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 min-h-[280px]"
+    >
+      <h3 className="text-lg font-semibold text-white mb-4">Smart Devices</h3>
+      <div className="space-y-3">
+        {devices.map((d, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0a0a] border border-[#1a1a1a]"
+          >
+            <span className="text-xl flex-shrink-0">{d.icon}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-white truncate">
+                  {d.name}
+                </span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${statusColors[d.status] ?? "bg-[#52525b]"}`}
+                />
+              </div>
+              <span className="text-xs text-[#71717a]">{d.value}</span>
+            </div>
+            <span className="text-xs text-[#52525b] capitalize">
+              {d.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
@@ -380,6 +652,9 @@ function DashboardContent() {
 
   const [profile, setProfile] = useState<DashboardProfile>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(!!profileId);
+  const [priceData, setPriceData] = useState<HourlyPrice[]>([]);
+  const [priceLoading, setPriceLoading] = useState(true);
+  const [alerts, setAlerts] = useState<AlertData[]>([]);
   const time = useCurrentTime();
   const savingsHistory = [8.4, 9.1, 11.3, 10.8, 12.5, 13.1, 14.2];
 
@@ -401,6 +676,52 @@ function DashboardContent() {
         setLoading(false);
       });
   }, [profileId]);
+
+  // Fetch price forecast + smart alerts
+  useEffect(() => {
+    setPriceLoading(true);
+    const alertUrl = profileId
+      ? `/api/alerts?profileId=${profileId}`
+      : `/api/alerts`;
+
+    fetch(alertUrl)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          if (data.prices?.length) setPriceData(data.prices);
+          if (data.alerts?.length) setAlerts(data.alerts);
+        }
+      })
+      .catch((err) => console.error("Failed to fetch alerts:", err))
+      .finally(() => setPriceLoading(false));
+  }, [profileId]);
+
+  // Handle alert accept action
+  const handleAlertAction = useCallback(
+    async (alertId: string) => {
+      try {
+        const res = await fetch("/api/alerts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ alertId, profileId }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Mark alert as resolved in local state
+          setAlerts((prev) =>
+            prev.map((a) =>
+              a.id === alertId
+                ? { ...a, severity: "resolved" as const, action: undefined }
+                : a
+            )
+          );
+        }
+      } catch (err) {
+        console.error("Failed to accept alert:", err);
+      }
+    },
+    [profileId]
+  );
 
   // Countdown to next risk window (mock: 36h 14m from now)
   const [countdown, setCountdown] = useState("36h 14m");
@@ -558,23 +879,21 @@ function DashboardContent() {
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           <div className="lg:col-span-3">
-            <PlaceholderSection label="Price Forecast" />
+            <PriceForecastChart prices={priceData} loading={priceLoading} />
           </div>
           <div className="lg:col-span-2">
-            <PlaceholderSection label="Smart Devices" />
+            <SmartDevicesPanel devices={profile.devices} />
           </div>
         </div>
 
         {/* ---------------------------------------------------------- */}
-        {/*  ROW 3 — Appliance Timeline + Alerts                        */}
+        {/*  ROW 3 — Alerts                                             */}
         {/* ---------------------------------------------------------- */}
-        <div className="grid grid-cols-1 lg:grid-cols-9 gap-6">
-          <div className="lg:col-span-5">
-            <PlaceholderSection label="Appliance Timeline" />
-          </div>
-          <div className="lg:col-span-4">
-            <AlertsPanel />
-          </div>
+        <div className="grid grid-cols-1 gap-6">
+          <AlertsPanel
+            alerts={alerts.length > 0 ? alerts : undefined}
+            onAction={handleAlertAction}
+          />
         </div>
       </main>
     </div>

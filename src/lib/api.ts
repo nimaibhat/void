@@ -139,6 +139,26 @@ export async function fetchEvents(scenario: string): Promise<TimelineEvent[]> {
 }
 
 /* ================================================================== */
+/*  GRID NODES                                                         */
+/* ================================================================== */
+export interface GridNodeData {
+  id: string;
+  lat: number;
+  lon: number;
+  base_load_mw: number;
+  capacity_mw: number;
+  voltage_kv: number;
+  weather_zone: string;
+}
+
+export async function fetchGridNodes(): Promise<GridNodeData[]> {
+  const res = await fetch("/api/grid-nodes");
+  if (!res.ok) throw new Error(`Grid nodes ${res.status}`);
+  const json = await res.json();
+  return json.data;
+}
+
+/* ================================================================== */
 /*  PRICES                                                             */
 /* ================================================================== */
 export interface HourlyPrice {
@@ -151,9 +171,10 @@ export interface HourlyPrice {
   grid_utilization_pct: number;
 }
 
-export async function fetchPrices(region: string, scenario: string): Promise<HourlyPrice[]> {
+export async function fetchPrices(region: string, scenario: string, mode?: string): Promise<HourlyPrice[]> {
+  const modeParam = mode ? `&mode=${mode}` : "";
   const res = await get<{ data: { prices: HourlyPrice[] } }>(
-    `/forecast/prices/${region}?scenario=${scenario}`
+    `/forecast/prices/${region}?scenario=${scenario}${modeParam}`
   );
   return res.data.prices;
 }

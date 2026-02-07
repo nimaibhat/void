@@ -25,6 +25,16 @@ export interface ArcData {
   status: "critical" | "stressed" | "nominal";
 }
 
+export interface GridNode {
+  id: string;
+  lat: number;
+  lon: number;
+  base_load_mw: number;
+  capacity_mw: number;
+  voltage_kv: number;
+  weather_zone: string;
+}
+
 interface FocusedLocation {
   lat: number;
   lng: number;
@@ -34,6 +44,7 @@ interface FocusedLocation {
 interface OperatorGlobeProps {
   hotspots?: HotspotData[];
   arcs?: ArcData[];
+  gridNodes?: GridNode[];
   focusedLocation?: FocusedLocation | null;
   onSelectCity?: (city: HotspotData) => void;
   onDeselectCity?: () => void;
@@ -54,6 +65,17 @@ const DEFAULT_HOTSPOTS: HotspotData[] = [
   { id: "chicago", city: "Chicago, IL", lat: 41.88, lng: -87.63, severity: 0, status: "nominal", threat: "None", cascade: 5 },
   { id: "miami", city: "Miami, FL", lat: 25.76, lng: -80.19, severity: 0, status: "nominal", threat: "None", cascade: 3 },
   { id: "seattle", city: "Seattle, WA", lat: 47.61, lng: -122.33, severity: 0, status: "nominal", threat: "None", cascade: 2 },
+  /* --- Travis150 Electric & Gas Infrastructure (Travis County, TX) --- */
+  { id: "sand-hill", city: "Sand Hill Power Plant", lat: 30.2098, lng: -97.6129, severity: 4, status: "critical", threat: "Gas Supply Freeze", cascade: 82 },
+  { id: "decker-creek", city: "Decker Creek Power Plant", lat: 30.3033, lng: -97.6128, severity: 4, status: "critical", threat: "Gas Supply Freeze", cascade: 78 },
+  { id: "lost-pines", city: "Lost Pines 1 Power Project", lat: 30.14, lng: -97.2714, severity: 4, status: "critical", threat: "Unit Trip — Ice", cascade: 85 },
+  { id: "sam-gideon", city: "Sam Gideon Power Plant", lat: 30.16, lng: -97.2708, severity: 4, status: "critical", threat: "Unit Trip — Ice", cascade: 80 },
+  { id: "marshall-ford", city: "Marshall Ford Power Plant", lat: 30.3899, lng: -97.9073, severity: 2, status: "stressed", threat: "Hydro Curtailment", cascade: 35 },
+  { id: "bastrop-energy", city: "Bastrop Energy Center", lat: 30.1458, lng: -97.55, severity: 3, status: "critical", threat: "Gas Pressure Drop", cascade: 68 },
+  { id: "mueller-energy", city: "Mueller Energy Center", lat: 30.305, lng: -97.7077, severity: 2, status: "stressed", threat: "Demand Surge", cascade: 40 },
+  { id: "webberville-solar", city: "Webberville Solar Project", lat: 30.2385, lng: -97.5088, severity: 3, status: "critical", threat: "Ice on Panels", cascade: 62 },
+  { id: "austin-power", city: "Austin Power Plant", lat: 30.2934, lng: -97.7844, severity: 3, status: "stressed", threat: "Load Shed Risk", cascade: 52 },
+  { id: "central-utility", city: "Central Utility Plant", lat: 30.3974, lng: -97.8426, severity: 2, status: "stressed", threat: "Demand Surge", cascade: 38 },
 ];
 
 const DEFAULT_ARCS: ArcData[] = [
@@ -62,6 +84,15 @@ const DEFAULT_ARCS: ArcData[] = [
   { startLat: 29.76, startLng: -95.37, endLat: 32.78, endLng: -96.80, status: "stressed" },
   { startLat: 40.71, startLng: -74.01, endLat: 41.88, endLng: -87.63, status: "nominal" },
   { startLat: 34.05, startLng: -118.24, endLat: 47.61, endLng: -122.33, status: "nominal" },
+  /* --- Travis150 infrastructure arcs --- */
+  { startLat: 30.2098, startLng: -97.6129, endLat: 30.3033, endLng: -97.6128, status: "critical" },   // Sand Hill ↔ Decker Creek
+  { startLat: 30.14, startLng: -97.2714, endLat: 30.16, endLng: -97.2708, status: "critical" },       // Lost Pines ↔ Sam Gideon
+  { startLat: 30.27, startLng: -97.74, endLat: 30.2098, endLng: -97.6129, status: "critical" },       // Austin ↔ Sand Hill
+  { startLat: 30.27, startLng: -97.74, endLat: 30.1458, endLng: -97.55, status: "critical" },         // Austin ↔ Bastrop Energy
+  { startLat: 30.3033, startLng: -97.6128, endLat: 30.305, endLng: -97.7077, status: "stressed" },    // Decker Creek ↔ Mueller
+  { startLat: 30.3899, startLng: -97.9073, endLat: 30.3974, endLng: -97.8426, status: "stressed" },   // Marshall Ford ↔ Central Utility
+  { startLat: 30.2385, startLng: -97.5088, endLat: 30.1458, endLng: -97.55, status: "critical" },     // Webberville Solar ↔ Bastrop
+  { startLat: 30.2934, startLng: -97.7844, endLat: 30.305, endLng: -97.7077, status: "stressed" },    // Austin Power ↔ Mueller
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -69,6 +100,12 @@ const STATUS_COLORS: Record<string, string> = {
   stressed: "#f59e0b",
   nominal: "#22c55e",
 };
+
+const AUSTIN_IDS = new Set([
+  "austin", "sand-hill", "decker-creek", "lost-pines", "sam-gideon",
+  "marshall-ford", "bastrop-energy", "mueller-energy", "webberville-solar",
+  "austin-power", "central-utility",
+]);
 
 /* ================================================================== */
 /*  HELPERS                                                            */
@@ -125,6 +162,7 @@ function greatCirclePoints(
 export default function OperatorGlobe({
   hotspots = DEFAULT_HOTSPOTS,
   arcs = DEFAULT_ARCS,
+  gridNodes = [],
   focusedLocation,
   onSelectCity,
   onDeselectCity,
@@ -158,6 +196,7 @@ export default function OperatorGlobe({
         cascade: h.cascade,
         color: STATUS_COLORS[h.status],
         radius: h.status === "critical" ? 8 : h.status === "stressed" ? 6 : 4,
+        isAustin: AUSTIN_IDS.has(h.id),
       },
       geometry: { type: "Point", coordinates: [h.lng, h.lat] },
     })),
@@ -176,6 +215,28 @@ export default function OperatorGlobe({
         geometry: { type: "Point", coordinates: [h.lng, h.lat] },
       })),
   }), [hotspots]);
+
+  const gridNodesGeoJSON = useMemo((): GeoJSON.FeatureCollection => ({
+    type: "FeatureCollection",
+    features: gridNodes.map((n) => {
+      // Color by voltage: 345/500kV = bright, 161kV = medium, <115kV = dim
+      const color = n.voltage_kv >= 300 ? "#3b82f6" : n.voltage_kv >= 100 ? "#6366f1" : "#4b5563";
+      const radius = n.voltage_kv >= 300 ? 3 : n.voltage_kv >= 100 ? 2 : 1.5;
+      return {
+        type: "Feature",
+        properties: {
+          id: n.id,
+          color,
+          radius,
+          voltage_kv: n.voltage_kv,
+          load_mw: n.base_load_mw,
+          capacity_mw: n.capacity_mw,
+          zone: n.weather_zone,
+        },
+        geometry: { type: "Point", coordinates: [n.lon, n.lat] },
+      };
+    }),
+  }), [gridNodes]);
 
   const arcsGeoJSON = useMemo((): GeoJSON.FeatureCollection => ({
     type: "FeatureCollection",
@@ -243,6 +304,29 @@ export default function OperatorGlobe({
       map.on("load", () => {
         if (cancelled) return;
 
+        /* --- Grid infrastructure nodes (background layer) --- */
+        map.addSource("grid-nodes", { type: "geojson", data: gridNodesGeoJSON });
+        map.addLayer({
+          id: "grid-node-dots",
+          type: "circle",
+          source: "grid-nodes",
+          paint: {
+            "circle-color": ["get", "color"],
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              2, ["get", "radius"],
+              6, ["*", ["get", "radius"], 2],
+              10, ["*", ["get", "radius"], 3],
+            ],
+            "circle-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              2, 0.4,
+              6, 0.7,
+              10, 0.9,
+            ],
+          },
+        });
+
         /* --- Hotspot points source & layer --- */
         map.addSource("hotspots", { type: "geojson", data: hotspotsGeoJSON });
         map.addLayer({
@@ -256,6 +340,27 @@ export default function OperatorGlobe({
             "circle-stroke-color": ["get", "color"],
             "circle-stroke-width": 1.5,
             "circle-stroke-opacity": 0.4,
+          },
+        });
+
+        /* --- Austin labels (red) --- */
+        map.addLayer({
+          id: "austin-labels",
+          type: "symbol",
+          source: "hotspots",
+          filter: ["==", ["get", "isAustin"], true],
+          layout: {
+            "text-field": ["get", "city"],
+            "text-size": 11,
+            "text-offset": [0, 1.4],
+            "text-anchor": "top",
+            "text-allow-overlap": false,
+            "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+          },
+          paint: {
+            "text-color": "#ef4444",
+            "text-halo-color": "rgba(0,0,0,0.8)",
+            "text-halo-width": 1.5,
           },
         });
 
@@ -420,6 +525,13 @@ export default function OperatorGlobe({
     const src = map.getSource("arcs") as mapboxgl.GeoJSONSource | undefined;
     if (src) src.setData(arcsGeoJSON);
   }, [arcsGeoJSON]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("grid-nodes") as mapboxgl.GeoJSONSource | undefined;
+    if (src) src.setData(gridNodesGeoJSON);
+  }, [gridNodesGeoJSON]);
 
   /* ---- Prop-driven zoom (from sidebar clicks) ---- */
   useEffect(() => {

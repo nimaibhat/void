@@ -18,9 +18,14 @@ class RegionStatus(str, Enum):
 
 
 class CrewStatus(str, Enum):
-    DEPLOYED = "deployed"
     STANDBY = "standby"
+    DISPATCHED = "dispatched"
     EN_ROUTE = "en_route"
+    ON_SITE = "on_site"
+    REPAIRING = "repairing"
+    COMPLETE = "complete"
+    # Legacy alias kept for existing static data
+    DEPLOYED = "deployed"
 
 
 class EventSeverity(str, Enum):
@@ -114,3 +119,64 @@ class OutcomeComparison(BaseModel):
     customers_saved: int
     price_reduction_pct: float
     cascade_reduction_pct: float
+
+
+# ── Crew Dispatch ─────────────────────────────────────────────────
+
+
+class FailedNode(BaseModel):
+    """A node that failed during cascade simulation."""
+    id: str
+    lat: float
+    lon: float
+    load_mw: float
+    capacity_mw: float
+    voltage_kv: float = 0.0
+    weather_zone: str = ""
+    failure_type: str = "unknown"  # transmission | substation | distribution | generation
+
+
+class DispatchAssignment(BaseModel):
+    """A recommended or confirmed crew → failed node assignment."""
+    assignment_id: str
+    crew_id: str
+    crew_name: str
+    target_node_id: str
+    target_lat: float
+    target_lon: float
+    distance_km: float
+    eta_minutes: int
+    specialty_match: str  # exact | partial | mismatch
+    match_score: float
+    failure_type: str
+    status: CrewStatus = CrewStatus.DISPATCHED
+    repair_minutes: int = 60
+    dispatched_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class DispatchRecommendation(BaseModel):
+    """Auto-dispatch recommendation response."""
+    assignments: List[DispatchAssignment]
+    unassigned_nodes: List[FailedNode]
+    total_crews_available: int
+    total_failed_nodes: int
+    avg_eta_minutes: float
+    coverage_pct: float
+
+
+class DispatchRequest(BaseModel):
+    """Request body for dispatching a single crew."""
+    crew_id: str
+    target_node_id: str
+
+
+class DispatchStatusResponse(BaseModel):
+    """Current state of all active dispatch assignments."""
+    assignments: List[DispatchAssignment]
+    crews: List[Crew]
+    repaired_nodes: List[str]
+    total_dispatched: int
+    total_repairing: int
+    total_complete: int

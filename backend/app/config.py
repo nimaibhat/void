@@ -28,17 +28,11 @@ class Settings(BaseSettings):
     # When set, backend can proxy to these instead of real EIA/ERCOT/CAISO/PJM.
     next_mock_api_base: str = "http://localhost:3000"
 
-    # ACTIVSg2000 grid data
-    activsg_case_file: str = "app/data/activsg2000/case_ACTIVSg2000.m"
-    activsg_aux_file: str = "app/data/activsg2000/ACTIVSg2000.aux"
+    # Supabase (grid data, ERCOT load, crews, etc.)
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
 
-    # Travis 150 grid data (Travis County overlay)
-    travis150_aux_file: str = "app/data/travis150/Travis150_Electric_Data.aux"
-
-    # ERCOT load data
-    ercot_load_file: str = "app/data/ercot/Native_Load_2021.xlsx"
-
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ["../.env", ".env"], "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

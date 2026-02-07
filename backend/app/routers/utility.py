@@ -1,17 +1,27 @@
-"""Utility operator endpoints — overview, crews, events, outcomes."""
+"""Utility operator endpoints — overview, crews, events, outcomes, dispatch."""
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.models.utility import (
     CrewOptimizationResponse,
+    DispatchRecommendation,
+    DispatchRequest,
+    DispatchStatusResponse,
+    DispatchAssignment,
     NationalOverview,
     OutcomeComparison,
     RegionOverview,
     TimelineEvent,
 )
 from app.schemas.responses import SuccessResponse
-from app.services import events_service, outcome_service, overview_service, utility_service
+from app.services import (
+    events_service,
+    outcome_service,
+    overview_service,
+    utility_service,
+    crew_dispatch_service,
+)
 
 router = APIRouter(prefix="/api/utility", tags=["utility"])
 
@@ -76,4 +86,104 @@ async def outcomes(
 ) -> SuccessResponse[OutcomeComparison]:
     """Without/With Blackout comparison."""
     data = outcome_service.get_outcomes(scenario=scenario)
+    return SuccessResponse(data=data)
+
+
+# ── Crew Dispatch ─────────────────────────────────────────────────────
+
+
+@router.post("/crews/dispatch/init", response_model=SuccessResponse[dict])
+async def dispatch_init(
+    scenario: str = Query(default="uri", examples=["uri", "normal"]),
+) -> SuccessResponse[dict]:
+    """Initialize the dispatch system: load crews, run cascade, classify failed nodes.
+
+    Must be called before recommend or dispatch.  Re-calling resets state.
+    """
+    from app.services import grid_graph_service, cascade_service, demand_service
+
+    # Reset dispatch state
+    crew_dispatch_service.reset(storm=(scenario == "uri"))
+
+    # Load crews
+    crew_data = utility_service.get_crews(scenario=scenario)
+    crew_dispatch_service.load_crews(crew_data.crews)
+
+    # Run cascade to get failed nodes
+    graph = grid_graph_service.grid_graph.graph
+    multipliers = demand_service.compute_demand_multipliers(
+        scenario=("uri" if scenario == "uri" else "normal"), forecast_hour=36
+    )
+    cascade_result = cascade_service.run_cascade(graph, multipliers, scenario_label=scenario)
+
+    # Get node attributes for classification
+    graph_nodes = {}
+    for nid in graph.nodes:
+        nd = graph.nodes[nid]
+        graph_nodes[nid] = {
+            "voltage_kv": nd.get("voltage_kv", nd.get("base_kv", 0.0)),
+            "capacity_mw": nd.get("capacity_mw", 0),
+            "base_load_mw": nd.get("base_load_mw", 0),
+            "weather_zone": nd.get("weather_zone", ""),
+        }
+
+    failed = crew_dispatch_service.load_failed_nodes(cascade_result, graph_nodes)
+
+    return SuccessResponse(data={
+        "status": "initialized",
+        "crews_loaded": len(crew_data.crews),
+        "failed_nodes": len(failed),
+        "cascade_depth": cascade_result["cascade_depth"],
+        "total_load_shed_mw": cascade_result["total_load_shed_mw"],
+    })
+
+
+@router.get("/crews/dispatch/recommend", response_model=SuccessResponse[DispatchRecommendation])
+async def dispatch_recommend() -> SuccessResponse[DispatchRecommendation]:
+    """Get recommended crew assignments based on the dispatch algorithm.
+
+    Returns assignments sorted by priority (highest severity first).
+    Does not actually dispatch — call POST /crews/dispatch to confirm.
+    """
+    rec = crew_dispatch_service.recommend_dispatch()
+    return SuccessResponse(data=rec)
+
+
+@router.post("/crews/dispatch", response_model=SuccessResponse[DispatchAssignment])
+async def dispatch_single(body: DispatchRequest) -> SuccessResponse[DispatchAssignment]:
+    """Dispatch a single crew to a specific failed node."""
+    try:
+        assignment = crew_dispatch_service.dispatch_crew(body.crew_id, body.target_node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return SuccessResponse(data=assignment)
+
+
+@router.post("/crews/dispatch/all", response_model=SuccessResponse[list[DispatchAssignment]])
+async def dispatch_all() -> SuccessResponse[list[DispatchAssignment]]:
+    """Accept all recommended assignments at once.
+
+    Runs recommend_dispatch() then dispatches every recommended crew.
+    """
+    rec = crew_dispatch_service.recommend_dispatch()
+    confirmed = crew_dispatch_service.dispatch_all(rec)
+    return SuccessResponse(data=confirmed)
+
+
+@router.get("/crews/dispatch/status", response_model=SuccessResponse[DispatchStatusResponse])
+async def dispatch_status() -> SuccessResponse[DispatchStatusResponse]:
+    """Get current dispatch status (assignments, crew positions, repaired nodes)."""
+    data = crew_dispatch_service.get_status()
+    return SuccessResponse(data=data)
+
+
+@router.post("/crews/dispatch/tick", response_model=SuccessResponse[DispatchStatusResponse])
+async def dispatch_tick() -> SuccessResponse[DispatchStatusResponse]:
+    """Advance the dispatch state machine.
+
+    Call periodically (e.g., every 5-10 seconds) to progress crews
+    through DISPATCHED → EN_ROUTE → ON_SITE → REPAIRING → COMPLETE.
+    Returns updated status.
+    """
+    data = crew_dispatch_service.tick()
     return SuccessResponse(data=data)

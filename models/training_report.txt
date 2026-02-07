@@ -1,0 +1,43 @@
+==============================================================
+  BLACKOUT — XGBoost Price Model Training Report
+==============================================================
+
+  Date:           2026-02-07 09:51 UTC
+  Data source:    supabase_ercot
+  Date range:     2021-01-01 to 2026-01-01
+  Samples:        43,818
+  Features:       16
+
+  -- Cross-Validation (5-fold TimeSeries) --
+     R²:   0.7776
+     MAE:  $6.61/MWh
+     RMSE: $29.46/MWh
+
+  -- Full Dataset --
+     R²:   0.9965
+     MAE:  $2.61/MWh
+     RMSE: $3.72/MWh
+
+  -- Normal Periods --
+     R²:   0.9943
+     MAE:  $2.59/MWh
+     RMSE: $3.67/MWh
+
+  -- Extreme Periods (cold < 20°F or heat > 100°F) --
+     R²:   0.9995
+     MAE:  $5.61/MWh
+     RMSE: $7.84/MWh
+
+  -- Feature Importance (top 10) --
+      1. grid_utilization_pct           0.6505
+      2. demand_estimate_mw             0.1783
+      3. heating_degree_hours           0.0550
+      4. cooling_degree_hours           0.0281
+      5. rolling_24h_avg_price          0.0258
+      6. hour_of_day                    0.0162
+      7. temperature_f                  0.0145
+      8. temp_change_6h                 0.0073
+      9. is_extreme_heat                0.0051
+     10. month                          0.0034
+
+==============================================================

@@ -6,6 +6,13 @@ import { motion, AnimatePresence } from "framer-motion";
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
+interface PayoutRecord {
+  id: string;
+  amount: string;
+  txHash: string;
+  timestamp: string;
+}
+
 interface Household {
   id: string;
   name: string;
@@ -13,6 +20,10 @@ interface Household {
   hvac: { currentTemp: number; setpoint: number; mode: string };
   credits: number;
   totalParticipations: number;
+  xrplWallet: { address: string; seed: string; trustLineCreated: boolean } | null;
+  savingsUSD_pending: number;
+  savingsUSD_paid: number;
+  payouts: PayoutRecord[];
 }
 
 interface GridEvent {
@@ -31,10 +42,12 @@ interface GridEvent {
 interface Recommendation {
   id: string;
   eventId: string;
+  eventType: string;
   householdId: string;
   currentSetpoint: number;
   recommendedSetpoint: number;
   estimatedCredits: number;
+  estimatedSavingsUSD: number;
   reason: string;
   status: "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
   respondedAt: string | null;
@@ -280,6 +293,11 @@ function IOSNotification({
           <span className="text-[7px] font-mono text-white/20 block -mt-0.5">
             credits
           </span>
+          {rec.estimatedSavingsUSD > 0 && (
+            <span className="text-[8px] font-mono text-purple-400/60 block mt-1">
+              +${rec.estimatedSavingsUSD.toFixed(2)} RLUSD
+            </span>
+          )}
         </div>
       </div>
 
@@ -308,9 +326,11 @@ function IOSNotification({
 function SuccessToast({
   setpoint,
   credits,
+  savingsUSD,
 }: {
   setpoint: number;
   credits: number;
+  savingsUSD?: number;
 }) {
   return (
     <motion.div
@@ -340,6 +360,11 @@ function SuccessToast({
           · Earned{" "}
           <span className="font-bold text-amber-400">+{credits} credits</span>
         </p>
+        {savingsUSD !== undefined && savingsUSD > 0 && (
+          <p className="text-[10px] text-purple-400/60 mt-1">
+            💰 +${savingsUSD.toFixed(2)} energy savings → RLUSD pending
+          </p>
+        )}
       </div>
     </motion.div>
   );
@@ -412,9 +437,16 @@ function HistoryEntry({ rec, event }: { rec: Recommendation; event?: GridEvent }
       </div>
       <span className="text-[8px] font-mono text-white/15 mt-1">{ts}</span>
       {rec.status === "ACCEPTED" && (
-        <span className="text-[9px] font-mono text-amber-400 font-bold mt-0.5">
-          +{rec.estimatedCredits}
-        </span>
+        <div className="text-right mt-0.5">
+          <span className="text-[9px] font-mono text-amber-400 font-bold block">
+            +{rec.estimatedCredits}
+          </span>
+          {rec.estimatedSavingsUSD > 0 && (
+            <span className="text-[7px] font-mono text-purple-400/50 block">
+              +${rec.estimatedSavingsUSD.toFixed(2)}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -437,6 +469,7 @@ export default function SimulationPage() {
   const [lastAccepted, setLastAccepted] = useState<{
     setpoint: number;
     credits: number;
+    savingsUSD?: number;
   } | null>(null);
   const [thermoAnimating, setThermoAnimating] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -446,6 +479,19 @@ export default function SimulationPage() {
   const [ntfyBaseUrl, setNtfyBaseUrl] = useState("");
   const [ntfyConnected, setNtfyConnected] = useState(false);
   const [ntfySending, setNtfySending] = useState(false);
+
+  // XRPL state
+  const [xrplSetupStep, setXrplSetupStep] = useState<
+    "none" | "funding" | "funded" | "linking" | "linked" | "trustline" | "ready"
+  >("none");
+  const [xrplLoading, setXrplLoading] = useState(false);
+  const [xrplWalletInfo, setXrplWalletInfo] = useState<{
+    address: string;
+    seed: string;
+  } | null>(null);
+  const [xrplBalance, setXrplBalance] = useState<string>("0");
+  const [xrplProgramWallet, setXrplProgramWallet] = useState<string>("");
+  const [xrplError, setXrplError] = useState<string>("");
 
   /* ── Fetch state ───────────────────────────────────── */
   const fetchState = useCallback(async () => {
@@ -483,6 +529,20 @@ export default function SimulationPage() {
       .catch(() => {});
   }, [fetchState]);
 
+  /* ── Sync XRPL state from household ── */
+  useEffect(() => {
+    if (!household) return;
+    if (household.xrplWallet) {
+      setXrplWalletInfo({
+        address: household.xrplWallet.address,
+        seed: household.xrplWallet.seed,
+      });
+      setXrplSetupStep(
+        household.xrplWallet.trustLineCreated ? "ready" : "linked"
+      );
+    }
+  }, [household]);
+
   /* ── Auto-poll: sync dashboard when phone action happens ── */
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -499,6 +559,7 @@ export default function SimulationPage() {
           setLastAccepted({
             setpoint: updatedRec.recommendedSetpoint,
             credits: updatedRec.estimatedCredits,
+            savingsUSD: updatedRec.estimatedSavingsUSD,
           });
           setPhase("accepted");
           setThermoAnimating(true);
@@ -594,11 +655,13 @@ export default function SimulationPage() {
       setLastAccepted({
         setpoint: activeRec.recommendedSetpoint,
         credits: activeRec.estimatedCredits,
+        savingsUSD: activeRec.estimatedSavingsUSD,
       });
       setPhase("accepted");
       setThermoAnimating(true);
       setTimeout(() => setThermoAnimating(false), 1500);
       await fetchState();
+      if (xrplSetupStep === "ready") handleXrplCheckBalance();
       // Auto-dismiss after 3s
       setTimeout(() => {
         setPhase("idle");
@@ -634,6 +697,151 @@ export default function SimulationPage() {
     }
   };
 
+  /* ── XRPL Setup ──────────────────────────────────── */
+  const handleXrplFund = async () => {
+    setXrplLoading(true);
+    setXrplError("");
+    try {
+      const res = await fetch("/api/xrpl/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "fund" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setXrplWalletInfo({ address: data.address, seed: data.seed });
+        setXrplSetupStep("funded");
+      } else {
+        setXrplError(data.error);
+      }
+    } catch {
+      setXrplError("Failed to fund wallet");
+    }
+    setXrplLoading(false);
+  };
+
+  const handleXrplLink = async () => {
+    if (!xrplWalletInfo || !household) return;
+    setXrplLoading(true);
+    setXrplError("");
+    try {
+      const res = await fetch("/api/xrpl/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "link",
+          householdId: household.id,
+          address: xrplWalletInfo.address,
+          seed: xrplWalletInfo.seed,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setXrplSetupStep("linked");
+        await fetchState();
+      } else {
+        setXrplError(data.error);
+      }
+    } catch {
+      setXrplError("Failed to link wallet");
+    }
+    setXrplLoading(false);
+  };
+
+  const handleXrplTrustline = async () => {
+    if (!household) return;
+    setXrplLoading(true);
+    setXrplError("");
+    try {
+      const res = await fetch("/api/xrpl/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "trustline",
+          householdId: household.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setXrplSetupStep("ready");
+        await fetchState();
+      } else {
+        setXrplError(data.error);
+      }
+    } catch {
+      setXrplError("Failed to create trust line");
+    }
+    setXrplLoading(false);
+  };
+
+  const handleXrplCheckBalance = async () => {
+    if (!household) return;
+    try {
+      const res = await fetch(
+        `/api/xrpl/status?householdId=${household.id}`
+      );
+      const data = await res.json();
+      if (data.ok && data.balances) {
+        setXrplBalance(data.balances.RLUSD);
+      }
+    } catch {
+      /* silent */
+    }
+  };
+
+  const handleXrplManualPayout = async () => {
+    if (!household) return;
+    setXrplLoading(true);
+    setXrplError("");
+    try {
+      const res = await fetch("/api/xrpl/payout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ householdId: household.id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await fetchState();
+        await handleXrplCheckBalance();
+      } else {
+        setXrplError(data.error);
+      }
+    } catch {
+      setXrplError("Payout failed");
+    }
+    setXrplLoading(false);
+  };
+
+  const handleXrplInfo = async () => {
+    try {
+      const res = await fetch("/api/xrpl/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "info" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setXrplProgramWallet(data.programWallet);
+      }
+    } catch {
+      /* silent */
+    }
+  };
+
+  useEffect(() => {
+    handleXrplInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Periodically refresh XRPL balance when wallet is ready
+  useEffect(() => {
+    if (xrplSetupStep !== "ready" || !household) return;
+    handleXrplCheckBalance();
+    const interval = setInterval(handleXrplCheckBalance, 10000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xrplSetupStep, household?.id]);
+
   /* ── Reset ─────────────────────────────────────────── */
   const handleReset = async () => {
     await fetch("/api/simulation", { method: "POST" });
@@ -641,6 +849,10 @@ export default function SimulationPage() {
     setActiveEvent(null);
     setActiveRec(null);
     setLastAccepted(null);
+    setXrplSetupStep("none");
+    setXrplWalletInfo(null);
+    setXrplBalance("0");
+    setXrplError("");
     await fetchState();
   };
 
@@ -880,6 +1092,163 @@ export default function SimulationPage() {
             )}
           </div>
 
+          {/* XRPL Wallet Setup */}
+          <div className="p-4 border-t border-white/[0.06] space-y-2">
+            <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest block">
+              💎 XRPL Rewards
+            </span>
+
+            {xrplSetupStep === "none" && (
+              <>
+                <p className="text-[8px] font-mono text-white/15 leading-relaxed">
+                  Connect an XRPL Testnet wallet to receive RLUSD payouts
+                  when your energy savings reach the threshold ($1.00).
+                </p>
+                <button
+                  onClick={handleXrplFund}
+                  disabled={xrplLoading}
+                  className="w-full text-[9px] font-mono py-1.5 rounded border border-purple-400/20 text-purple-400/60 hover:bg-purple-400/[0.06] transition-all cursor-pointer disabled:opacity-30"
+                >
+                  {xrplLoading ? "Creating wallet…" : "1. Create Testnet Wallet"}
+                </button>
+              </>
+            )}
+
+            {xrplSetupStep === "funded" && xrplWalletInfo && (
+              <>
+                <div className="bg-white/[0.03] rounded p-2">
+                  <p className="text-[8px] font-mono text-white/30">
+                    Address:
+                  </p>
+                  <p className="text-[7px] font-mono text-purple-400/70 break-all">
+                    {xrplWalletInfo.address}
+                  </p>
+                </div>
+                <button
+                  onClick={handleXrplLink}
+                  disabled={xrplLoading}
+                  className="w-full text-[9px] font-mono py-1.5 rounded border border-purple-400/20 text-purple-400/60 hover:bg-purple-400/[0.06] transition-all cursor-pointer disabled:opacity-30"
+                >
+                  {xrplLoading ? "Linking…" : "2. Link to Martinez Household"}
+                </button>
+              </>
+            )}
+
+            {xrplSetupStep === "linked" && (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  <span className="text-[8px] font-mono text-amber-400/60">
+                    Wallet linked — need trust line
+                  </span>
+                </div>
+                <button
+                  onClick={handleXrplTrustline}
+                  disabled={xrplLoading}
+                  className="w-full text-[9px] font-mono py-1.5 rounded border border-purple-400/20 text-purple-400/60 hover:bg-purple-400/[0.06] transition-all cursor-pointer disabled:opacity-30"
+                >
+                  {xrplLoading
+                    ? "Creating trust line…"
+                    : "3. Create RLUSD Trust Line"}
+                </button>
+                {xrplProgramWallet && (
+                  <p className="text-[7px] font-mono text-white/10">
+                    Issuer: {xrplProgramWallet.slice(0, 12)}…
+                  </p>
+                )}
+              </>
+            )}
+
+            {xrplSetupStep === "ready" && (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                  <span className="text-[8px] font-mono text-purple-400/60">
+                    Ready for RLUSD payouts
+                  </span>
+                </div>
+                <div className="bg-white/[0.03] rounded p-2 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[7px] font-mono text-white/20">
+                      RLUSD Balance
+                    </span>
+                    <span className="text-[8px] font-mono font-bold text-purple-400">
+                      {xrplBalance}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[7px] font-mono text-white/20">
+                      Pending Savings
+                    </span>
+                    <span className="text-[8px] font-mono text-amber-400">
+                      ${(household?.savingsUSD_pending ?? 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[7px] font-mono text-white/20">
+                      Total Paid Out
+                    </span>
+                    <span className="text-[8px] font-mono text-[#22c55e]">
+                      ${(household?.savingsUSD_paid ?? 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[7px] font-mono text-white/20">
+                      Threshold
+                    </span>
+                    <span className="text-[8px] font-mono text-white/30">
+                      $1.00
+                    </span>
+                  </div>
+                  {/* Progress bar to threshold */}
+                  <div className="h-1 rounded-full bg-white/[0.04] overflow-hidden mt-1">
+                    <motion.div
+                      className="h-full rounded-full bg-purple-400"
+                      animate={{
+                        width: `${Math.min(
+                          100,
+                          ((household?.savingsUSD_pending ?? 0) / 1.0) * 100
+                        )}%`,
+                      }}
+                      transition={{ duration: 0.5 }}
+                    />
+                  </div>
+                  <p className="text-[6px] font-mono text-white/10 text-center">
+                    {(household?.savingsUSD_pending ?? 0) >= 1.0
+                      ? "Threshold reached! Payout on next accept."
+                      : `$${(1.0 - (household?.savingsUSD_pending ?? 0)).toFixed(
+                          2
+                        )} more to payout`}
+                  </p>
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={handleXrplManualPayout}
+                    disabled={
+                      xrplLoading ||
+                      (household?.savingsUSD_pending ?? 0) < 1.0
+                    }
+                    className="flex-1 text-[8px] font-mono py-1.5 rounded border border-purple-400/20 text-purple-400/50 hover:bg-purple-400/[0.06] transition-all cursor-pointer disabled:opacity-20"
+                  >
+                    Manual Payout
+                  </button>
+                  <button
+                    onClick={handleXrplCheckBalance}
+                    className="text-[8px] font-mono py-1.5 px-2 rounded border border-white/[0.06] text-white/20 hover:text-purple-400/60 transition-all cursor-pointer"
+                  >
+                    ↻
+                  </button>
+                </div>
+              </>
+            )}
+
+            {xrplError && (
+              <p className="text-[8px] font-mono text-red-400/60">
+                {xrplError}
+              </p>
+            )}
+          </div>
+
           {/* Reset */}
           <div className="p-4 border-t border-white/[0.06]">
             <button
@@ -929,8 +1298,8 @@ export default function SimulationPage() {
               />
             )}
 
-            {/* Credits bar */}
-            <div className="flex items-center justify-center gap-6">
+            {/* Credits & Savings bar */}
+            <div className="flex items-center justify-center gap-4">
               <div className="text-center">
                 <span className="text-[8px] font-mono text-white/20 block">
                   CREDITS
@@ -947,10 +1316,22 @@ export default function SimulationPage() {
               <div className="w-px h-8 bg-white/[0.06]" />
               <div className="text-center">
                 <span className="text-[8px] font-mono text-white/20 block">
-                  PARTICIPATIONS
+                  SAVINGS
                 </span>
-                <span className="text-[22px] font-mono font-bold text-white/50">
-                  {household?.totalParticipations ?? 0}
+                <span className="text-[18px] font-mono font-bold text-amber-400">
+                  ${(household?.savingsUSD_pending ?? 0).toFixed(2)}
+                </span>
+                <span className="text-[7px] font-mono text-white/15 block -mt-0.5">
+                  pending
+                </span>
+              </div>
+              <div className="w-px h-8 bg-white/[0.06]" />
+              <div className="text-center">
+                <span className="text-[8px] font-mono text-white/20 block">
+                  RLUSD PAID
+                </span>
+                <span className="text-[18px] font-mono font-bold text-purple-400">
+                  ${(household?.savingsUSD_paid ?? 0).toFixed(2)}
                 </span>
               </div>
               <div className="w-px h-8 bg-white/[0.06]" />
@@ -958,11 +1339,26 @@ export default function SimulationPage() {
                 <span className="text-[8px] font-mono text-white/20 block">
                   MODE
                 </span>
-                <span className="text-[16px] font-mono font-bold text-white/40">
+                <span className="text-[14px] font-mono font-bold text-white/40">
                   {household?.hvac.mode ?? "—"}
                 </span>
               </div>
             </div>
+
+            {/* XRPL wallet status badge */}
+            {household?.xrplWallet?.trustLineCreated && (
+              <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center gap-1.5 bg-purple-500/[0.08] border border-purple-500/20 rounded-full px-3 py-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                  <span className="text-[9px] font-mono text-purple-400/80">
+                    XRPL Wallet: {household.xrplWallet.address.slice(0, 8)}…
+                  </span>
+                  <span className="text-[9px] font-mono font-bold text-purple-400">
+                    {xrplBalance} RLUSD
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* ── Notification area ─────────────────── */}
             <AnimatePresence mode="wait">
@@ -981,6 +1377,7 @@ export default function SimulationPage() {
                   key="success"
                   setpoint={lastAccepted.setpoint}
                   credits={lastAccepted.credits}
+                  savingsUSD={lastAccepted.savingsUSD}
                 />
               )}
 
@@ -1013,6 +1410,39 @@ export default function SimulationPage() {
                       <HistoryEntry key={rec.id} rec={rec} event={ev} />
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* XRPL Payout History */}
+            {household?.payouts && household.payouts.length > 0 && (
+              <div>
+                <span className="text-[9px] font-mono text-white/20 uppercase tracking-widest block mb-2">
+                  💎 RLUSD Payouts
+                </span>
+                <div className="rounded-xl border border-purple-500/10 bg-purple-500/[0.02] px-3 py-1 divide-y divide-white/[0.04]">
+                  {[...household.payouts].reverse().map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-3 py-2.5"
+                    >
+                      <span className="text-[14px]">💰</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[10px] font-mono text-purple-400 font-bold">
+                          ${p.amount} RLUSD
+                        </span>
+                        <p className="text-[7px] font-mono text-white/15 truncate">
+                          TX: {p.txHash.slice(0, 20)}…
+                        </p>
+                      </div>
+                      <span className="text-[8px] font-mono text-white/15">
+                        {new Date(p.timestamp).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1085,6 +1515,20 @@ export default function SimulationPage() {
                 active: false,
                 done: phase === "accepted",
               },
+              {
+                step: 6,
+                label: "Savings → RLUSD",
+                detail:
+                  phase === "accepted" && lastAccepted?.savingsUSD
+                    ? `+$${lastAccepted.savingsUSD.toFixed(2)} (pending: $${(
+                        household?.savingsUSD_pending ?? 0
+                      ).toFixed(2)})`
+                    : xrplSetupStep === "ready"
+                    ? "Waiting for accept…"
+                    : "Set up XRPL wallet first",
+                active: false,
+                done: phase === "accepted" && !!lastAccepted?.savingsUSD,
+              },
             ].map((s) => (
               <div key={s.step} className="flex gap-3">
                 <div className="flex flex-col items-center">
@@ -1099,7 +1543,7 @@ export default function SimulationPage() {
                   >
                     {s.done ? "✓" : s.step}
                   </div>
-                  {s.step < 5 && (
+                  {s.step < 6 && (
                     <div
                       className={`w-px h-6 ${
                         s.done
@@ -1135,12 +1579,17 @@ export default function SimulationPage() {
             ))}
           </div>
 
-          {/* Enode note */}
-          <div className="p-4 border-t border-white/[0.06]">
+          {/* Enode + XRPL note */}
+          <div className="p-4 border-t border-white/[0.06] space-y-2">
             <p className="text-[8px] font-mono text-white/15 leading-relaxed">
               {household?.isReal
                 ? "🟢 Enode HVAC linked — accepts will adjust real device"
                 : "💡 Link your Enode HVAC on the Device Sandbox page to make accepts control a real thermostat."}
+            </p>
+            <p className="text-[8px] font-mono text-white/15 leading-relaxed">
+              {xrplSetupStep === "ready"
+                ? "💎 XRPL wallet active — savings accumulate per event duration and auto-pay as RLUSD when threshold is met."
+                : "💎 Set up an XRPL wallet in the left panel to receive RLUSD tokens for your energy savings."}
             </p>
           </div>
         </div>

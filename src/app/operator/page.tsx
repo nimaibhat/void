@@ -15,14 +15,16 @@ import {
   fetchCascadeProbability,
   fetchCrews,
   fetchEvents,
+  fetchGridNodes,
   type OverviewData,
   type Hotspot,
   type Arc,
   type CascadeProbability,
   type Crew,
   type TimelineEvent,
+  type GridNodeData,
 } from "@/lib/api";
-import type { HotspotData, ArcData } from "@/components/OperatorGlobe";
+import type { HotspotData, ArcData, GridNode } from "@/components/OperatorGlobe";
 import type { CrewData, EventData } from "@/components/OperatorRightSidebar";
 
 /* ================================================================== */
@@ -462,6 +464,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
   const [crews, setCrews] = useState<CrewData[]>([]);
   const [events, setEvents] = useState<EventData[]>([]);
   const [crewCoverage, setCrewCoverage] = useState(0);
+  const [gridNodes, setGridNodes] = useState<GridNode[]>([]);
 
   /* ---- UI state ---- */
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
@@ -493,6 +496,13 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  /* ---- Fetch grid nodes once (independent of scenario) ---- */
+  useEffect(() => {
+    fetchGridNodes()
+      .then((nodes) => setGridNodes(nodes))
+      .catch((err) => console.error("Failed to load grid nodes:", err));
   }, []);
 
   /* ---- Entry modal submit ---- */
@@ -639,6 +649,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
           <OperatorGlobe
             hotspots={hotspots}
             arcs={arcs}
+            gridNodes={gridNodes}
             focusedLocation={focusedLocation}
             onSelectCity={(city) => setFocusedThreatId(city.id)}
             onDeselectCity={() => {

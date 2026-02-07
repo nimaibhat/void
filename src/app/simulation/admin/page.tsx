@@ -213,10 +213,14 @@ export default function AdminPage() {
         if (data.ok) {
           setXrplBalances((prev) => ({
             ...prev,
+<<<<<<< HEAD
             [hhId]: {
               rlusd: data.rlusdBalance ?? 0,
               xrp: data.xrpBalance ?? 0,
             },
+=======
+            [hhId]: { rlusd: data.rlusdBalance ?? 0, xrp: data.xrpBalance ?? 0 },
+>>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
           }));
         }
       } catch {
@@ -272,10 +276,14 @@ export default function AdminPage() {
   };
 
   /* ── Accept/Decline on behalf of a household ──────────── */
+<<<<<<< HEAD
   const handleRespond = async (
     recId: string,
     action: "ACCEPT" | "DECLINE"
   ) => {
+=======
+  const handleRespond = async (recId: string, action: "ACCEPT" | "DECLINE") => {
+>>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
     try {
       const res = await fetch("/api/simulation/respond", {
         method: "POST",
@@ -375,6 +383,7 @@ export default function AdminPage() {
   const activeEvent = events.find((e) => e.active);
   const totalCredits = households.reduce((s, h) => s + h.credits, 0);
   const totalPaid = households.reduce((s, h) => s + h.savingsUSD_paid, 0);
+<<<<<<< HEAD
   const totalPending = households.reduce(
     (s, h) => s + h.savingsUSD_pending,
     0
@@ -383,6 +392,12 @@ export default function AdminPage() {
     households.length > 0 && households.every((h) => h.xrplWallet);
 
   // Get recommendations for each household
+=======
+  const totalPending = households.reduce((s, h) => s + h.savingsUSD_pending, 0);
+  const allHaveWallets = households.length > 0 && households.every((h) => h.xrplWallet);
+
+  // Get recommendations for each household for the active event
+>>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
   const getHouseholdRecs = (hhId: string) =>
     recommendations.filter((r) => r.householdId === hhId);
   const getActiveRec = (hhId: string) =>
@@ -537,6 +552,7 @@ export default function AdminPage() {
             </span>
             <div className="space-y-2">
               {[
+<<<<<<< HEAD
                 {
                   label: "Total Credits",
                   value: totalCredits.toString(),
@@ -576,6 +592,28 @@ export default function AdminPage() {
                   <span
                     className={`text-[12px] font-mono font-bold ${stat.color}`}
                   >
+=======
+                { label: "Total Credits", value: totalCredits.toString(), color: "text-amber-400" },
+                { label: "Total RLUSD Paid", value: `$${totalPaid.toFixed(2)}`, color: "text-emerald-400" },
+                { label: "Pending Savings", value: `$${totalPending.toFixed(2)}`, color: "text-blue-400" },
+                {
+                  label: "Participation Rate",
+                  value: households.length > 0
+                    ? `${Math.round(
+                        (households.filter((h) => h.totalParticipations > 0).length /
+                          households.length) *
+                          100
+                      )}%`
+                    : "—",
+                  color: "text-white/60",
+                },
+              ].map((stat) => (
+                <div key={stat.label} className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono text-white/25">
+                    {stat.label}
+                  </span>
+                  <span className={`text-[12px] font-mono font-bold ${stat.color}`}>
+>>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
                     {stat.value}
                   </span>
                 </div>
@@ -853,8 +891,12 @@ export default function AdminPage() {
                                 {rec.status}
                               </span>
                               <span className="text-[9px] font-mono text-white/25">
+<<<<<<< HEAD
                                 {rec.currentSetpoint}° →{" "}
                                 {rec.recommendedSetpoint}°
+=======
+                                {rec.currentSetpoint}° → {rec.recommendedSetpoint}°
+>>>>>>> 44f8655ddc1f10d7dfba2ef22d4f4309146ea770
                               </span>
                             </div>
                             <span className="text-[9px] font-mono text-amber-400/60">
