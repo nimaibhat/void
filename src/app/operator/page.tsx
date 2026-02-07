@@ -182,38 +182,45 @@ const activityFeed: ActivityEvent[] = [
    ═══════════════════════════════════════════════════════════════════════ */
 
 const riskStyles: Record<RiskLevel, { bg: string; border: string; text: string; dot: string }> = {
-  critical: { bg: "bg-red-500/15", border: "border-red-500/40", text: "text-red-400", dot: "bg-red-500" },
-  elevated: { bg: "bg-orange-500/15", border: "border-orange-500/40", text: "text-orange-400", dot: "bg-orange-500" },
-  monitoring: { bg: "bg-amber-500/15", border: "border-amber-500/40", text: "text-amber-400", dot: "bg-amber-500" },
-  normal: { bg: "bg-emerald-500/15", border: "border-emerald-500/40", text: "text-emerald-400", dot: "bg-emerald-500" },
+  critical: { bg: "bg-[#ef4444]/15", border: "border-[#ef4444]/40", text: "text-[#ef4444]", dot: "bg-[#ef4444]" },
+  elevated: { bg: "bg-[#f97316]/15", border: "border-[#f97316]/40", text: "text-[#f97316]", dot: "bg-[#f97316]" },
+  monitoring: { bg: "bg-[#f59e0b]/15", border: "border-[#f59e0b]/40", text: "text-[#f59e0b]", dot: "bg-[#f59e0b]" },
+  normal: { bg: "bg-[#22c55e]/15", border: "border-[#22c55e]/40", text: "text-[#22c55e]", dot: "bg-[#22c55e]" },
 };
 
 function loadBarColor(load: number) {
-  if (load >= 85) return "bg-red-500";
-  if (load >= 70) return "bg-amber-500";
-  if (load >= 55) return "bg-yellow-500";
-  return "bg-emerald-500";
+  if (load >= 85) return "bg-[#ef4444]";
+  if (load >= 70) return "bg-[#f59e0b]";
+  if (load >= 55) return "bg-[#eab308]";
+  return "bg-[#22c55e]";
+}
+
+function loadTextColor(load: number) {
+  if (load >= 85) return "text-[#ef4444]";
+  if (load >= 70) return "text-[#f59e0b]";
+  if (load >= 55) return "text-[#eab308]";
+  return "text-[#22c55e]";
 }
 
 function statusText(s: string) {
-  if (s === "critical") return "text-red-400";
-  if (s === "stressed") return "text-orange-400";
-  if (s === "monitoring" || s === "elevated") return "text-amber-400";
-  return "text-emerald-400";
+  if (s === "critical") return "text-[#ef4444]";
+  if (s === "stressed") return "text-[#f97316]";
+  if (s === "monitoring" || s === "elevated") return "text-[#f59e0b]";
+  return "text-[#22c55e]";
 }
 
 function crewStatusStyle(s: string) {
-  if (s === "deployed") return "bg-emerald-500/15 text-emerald-400";
-  if (s === "en-route") return "bg-blue-500/15 text-blue-400";
-  if (s === "staged") return "bg-amber-500/15 text-amber-400";
-  return "bg-slate-700/50 text-slate-400";
+  if (s === "deployed") return "bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/25";
+  if (s === "en-route") return "bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/25";
+  if (s === "staged") return "bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/25";
+  return "bg-[#333]/50 text-[#a1a1aa] border border-[#333]";
 }
 
 function eventTypeStyle(t: string) {
-  if (t === "critical") return { dot: "bg-red-500", text: "text-red-400" };
-  if (t === "warning") return { dot: "bg-amber-500", text: "text-amber-400" };
-  if (t === "success") return { dot: "bg-emerald-500", text: "text-emerald-400" };
-  return { dot: "bg-blue-500", text: "text-blue-400" };
+  if (t === "critical") return { dot: "bg-[#ef4444]", text: "text-[#ef4444]" };
+  if (t === "warning") return { dot: "bg-[#f59e0b]", text: "text-[#f59e0b]" };
+  if (t === "success") return { dot: "bg-[#22c55e]", text: "text-[#22c55e]" };
+  return { dot: "bg-[#3b82f6]", text: "text-[#3b82f6]" };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -223,10 +230,10 @@ function eventTypeStyle(t: string) {
 function StatusDot({ status, pulse = false }: { status: string; pulse?: boolean }) {
   const color =
     status === "critical" || status === "stressed"
-      ? "bg-red-500"
+      ? "bg-[#ef4444]"
       : status === "monitoring" || status === "elevated"
-        ? "bg-amber-500"
-        : "bg-emerald-500";
+        ? "bg-[#f59e0b]"
+        : "bg-[#22c55e]";
   return (
     <span className="relative inline-flex h-3 w-3 shrink-0">
       {pulse && <span className={`absolute inset-0 rounded-full ${color} animate-ping opacity-40`} />}
@@ -237,7 +244,7 @@ function StatusDot({ status, pulse = false }: { status: string; pulse?: boolean 
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-slate-900/60 border border-slate-700/50 rounded-xl backdrop-blur-sm ${className}`}>
+    <div className={`bg-[#111111] border border-[#1a1a1a] rounded-xl ${className}`}>
       {children}
     </div>
   );
@@ -247,11 +254,11 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 function PredictionTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const val = payload[0].value as number;
-  const color = val >= 60 ? "text-red-400" : val >= 40 ? "text-amber-400" : "text-emerald-400";
+  const color = val >= 60 ? "text-[#ef4444]" : val >= 40 ? "text-[#f59e0b]" : "text-[#22c55e]";
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 shadow-xl">
-      <p className="text-sm text-slate-400 mb-1">{label}</p>
-      <p className={`text-lg font-semibold ${color}`}>{val}% probability</p>
+    <div className="bg-[#111111] border border-[#333] rounded-xl px-5 py-3 shadow-2xl">
+      <p className="text-sm text-[#a1a1aa] mb-1">{label}</p>
+      <p className={`text-xl font-bold ${color}`}>{val}% probability</p>
     </div>
   );
 }
@@ -260,13 +267,13 @@ function PredictionTooltip({ active, payload, label }: any) {
    HEADER WITH TABS
    ═══════════════════════════════════════════════════════════════════════ */
 
-function DashboardHeader({ 
-  time, 
-  activeTab, 
-  onTabChange 
-}: { 
-  time: Date; 
-  activeTab: TabType; 
+function DashboardHeader({
+  time,
+  activeTab,
+  onTabChange,
+}: {
+  time: Date;
+  activeTab: TabType;
   onTabChange: (tab: TabType) => void;
 }) {
   const totalAlerts = regions.reduce((a, r) => a + r.alerts, 0);
@@ -274,7 +281,7 @@ function DashboardHeader({
   const totalCrews = regions.reduce((a, r) => a + r.crewsDeployed, 0);
   const avgLoad = Math.round(regions.reduce((a, r) => a + r.load, 0) / regions.length);
   const overallHealth = 100 - Math.round(avgLoad * 0.6 + maxRisk * 0.4);
-  const healthColor = overallHealth >= 75 ? "text-emerald-400" : overallHealth >= 50 ? "text-amber-400" : "text-red-400";
+  const healthColor = overallHealth >= 75 ? "text-[#22c55e]" : overallHealth >= 50 ? "text-[#f59e0b]" : "text-[#ef4444]";
 
   const timeStr = time.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -286,18 +293,24 @@ function DashboardHeader({
   ];
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80">
-      <div className="max-w-[1800px] mx-auto px-8">
+    <header className="sticky top-0 z-40 w-full bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[#1a1a1a]">
+      <div className="max-w-[1400px] mx-auto px-6">
         {/* Top bar */}
-        <div className="h-20 flex items-center justify-between border-b border-slate-800/50">
+        <div className="h-20 flex items-center justify-between border-b border-[#1a1a1a]/60">
           {/* Left: Brand */}
           <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-3 group">
-              <HiOutlineBolt className="w-7 h-7 text-amber-400 group-hover:text-amber-300 transition-colors" />
-              <span className="text-lg font-bold text-slate-100 tracking-tight">BLACKOUT</span>
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center h-11 px-4 rounded-lg border border-[#333] text-sm text-[#a1a1aa] hover:text-white hover:border-[#555] transition-colors"
+            >
+              ← Back
             </Link>
-            <span className="w-px h-6 bg-slate-700" />
-            <span className="text-base text-slate-400 font-medium">Operator Dashboard</span>
+            <div className="flex items-center gap-2.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+              <span className="text-[15px] font-semibold tracking-tight text-white">blackout</span>
+            </div>
+            <span className="w-px h-6 bg-[#333]" />
+            <span className="text-base text-[#a1a1aa] font-medium">Operator Dashboard</span>
           </div>
 
           {/* Center: Key metrics */}
@@ -305,29 +318,29 @@ function DashboardHeader({
             <div className="flex items-center gap-3">
               <HiOutlineShieldCheck className={`w-5 h-5 ${healthColor}`} />
               <div>
-                <p className="text-xs text-slate-500">Grid Health</p>
+                <p className="text-xs text-[#71717a]">Grid Health</p>
                 <p className={`text-lg font-bold ${healthColor}`}>{overallHealth}%</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <HiOutlineBellAlert className={`w-5 h-5 ${totalAlerts > 0 ? "text-red-400" : "text-slate-500"}`} />
+              <HiOutlineBellAlert className={`w-5 h-5 ${totalAlerts > 0 ? "text-[#ef4444]" : "text-[#71717a]"}`} />
               <div>
-                <p className="text-xs text-slate-500">Active Alerts</p>
-                <p className={`text-lg font-bold ${totalAlerts > 0 ? "text-red-400" : "text-slate-300"}`}>{totalAlerts}</p>
+                <p className="text-xs text-[#71717a]">Active Alerts</p>
+                <p className={`text-lg font-bold ${totalAlerts > 0 ? "text-[#ef4444]" : "text-white"}`}>{totalAlerts}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <HiOutlineExclamationTriangle className={`w-5 h-5 ${maxRisk >= 30 ? "text-red-400" : maxRisk >= 10 ? "text-amber-400" : "text-emerald-400"}`} />
+              <HiOutlineExclamationTriangle className={`w-5 h-5 ${maxRisk >= 30 ? "text-[#ef4444]" : maxRisk >= 10 ? "text-[#f59e0b]" : "text-[#22c55e]"}`} />
               <div>
-                <p className="text-xs text-slate-500">Peak Risk</p>
-                <p className={`text-lg font-bold ${maxRisk >= 30 ? "text-red-400" : maxRisk >= 10 ? "text-amber-400" : "text-emerald-400"}`}>{maxRisk}%</p>
+                <p className="text-xs text-[#71717a]">Peak Risk</p>
+                <p className={`text-lg font-bold ${maxRisk >= 30 ? "text-[#ef4444]" : maxRisk >= 10 ? "text-[#f59e0b]" : "text-[#22c55e]"}`}>{maxRisk}%</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <HiOutlineUserGroup className="w-5 h-5 text-blue-400" />
+              <HiOutlineUserGroup className="w-5 h-5 text-[#3b82f6]" />
               <div>
-                <p className="text-xs text-slate-500">Active Crews</p>
-                <p className="text-lg font-bold text-blue-400">{totalCrews}</p>
+                <p className="text-xs text-[#71717a]">Active Crews</p>
+                <p className="text-lg font-bold text-[#3b82f6]">{totalCrews}</p>
               </div>
             </div>
           </div>
@@ -336,12 +349,12 @@ function DashboardHeader({
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#22c55e]" />
               </span>
-              <span className="text-sm text-emerald-400 font-medium">LIVE</span>
+              <span className="text-sm text-[#22c55e] font-medium">LIVE</span>
             </div>
-            <span className="text-base font-mono text-slate-300 tabular-nums">{timeStr} EST</span>
+            <span className="text-base font-mono text-[#a1a1aa] tabular-nums">{timeStr} EST</span>
           </div>
         </div>
 
@@ -354,10 +367,10 @@ function DashboardHeader({
               <button
                 key={tab.id}
                 onClick={() => onTabChange(tab.id)}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg transition-all duration-200 ${
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border transition-all duration-200 cursor-pointer ${
                   isActive
-                    ? "bg-slate-800 text-slate-100 shadow-lg"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                    ? "bg-[#1a1a1a] text-white border-[#333]"
+                    : "text-[#a1a1aa] hover:text-white hover:bg-[#1a1a1a]/50 border-transparent"
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -375,126 +388,145 @@ function DashboardHeader({
    OVERVIEW TAB
    ═══════════════════════════════════════════════════════════════════════ */
 
-function OverviewTab({ selectedRegion }: { selectedRegion: string | null }) {
-  const criticalRegions = regions.filter(r => r.riskLevel === "critical" || r.riskLevel === "elevated");
-  
+function OverviewTab() {
+  const criticalRegions = regions.filter((r) => r.riskLevel === "critical" || r.riskLevel === "elevated");
+
   return (
     <div className="space-y-8">
       {/* Critical Alerts Banner */}
       {criticalRegions.length > 0 && (
-        <Card className="p-6 border-l-4 border-l-red-500 bg-red-500/5">
-          <div className="flex items-start gap-4">
-            <HiOutlineExclamationTriangle className="w-8 h-8 text-red-400 shrink-0 mt-1" />
-            <div className="flex-1">
-              <h3 className="text-xl font-bold text-red-400 mb-2">Critical Regions Detected</h3>
-              <p className="text-base text-slate-300 mb-4">
-                {criticalRegions.length} region{criticalRegions.length > 1 ? 's' : ''} requiring immediate attention
-              </p>
-              <div className="flex flex-wrap gap-3">
-                {criticalRegions.map(region => (
-                  <div key={region.id} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/60">
-                    <StatusDot status={region.riskLevel} pulse />
-                    <span className="text-base font-semibold text-slate-200">{region.id}</span>
-                    <span className="text-sm text-slate-400">{region.cascadeProb}% risk</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {regions.slice(0, 4).map((region) => (
-          <Card key={region.id} className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <StatusDot status={region.riskLevel} pulse={region.riskLevel === "critical"} />
-                <h3 className="text-lg font-bold text-slate-100">{region.id}</h3>
-              </div>
-              {region.alerts > 0 && (
-                <span className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1 rounded-full font-semibold">
-                  {region.alerts} alert{region.alerts > 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-slate-400">Load</span>
-                  <span className={`text-xl font-bold ${loadBarColor(region.load).replace('bg-', 'text-')}`}>
-                    {region.load}%
-                  </span>
-                </div>
-                <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-                  <motion.div
-                    className={`h-full rounded-full ${loadBarColor(region.load)}`}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(region.load / region.capacity) * 100}%` }}
-                    transition={{ duration: 1 }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Cascade Risk</p>
-                  <p className={`text-lg font-bold ${riskStyles[region.riskLevel].text}`}>
-                    {region.cascadeProb}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Price</p>
-                  <p className={`text-lg font-bold ${region.price > 100 ? 'text-red-400' : 'text-slate-200'}`}>
-                    ${region.price}
-                  </p>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <Card className="p-8 border-l-4 border-l-[#ef4444]">
+            <div className="flex items-start gap-5">
+              <HiOutlineExclamationTriangle className="w-8 h-8 text-[#ef4444] shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="text-2xl font-bold text-[#ef4444] mb-2">Critical Regions Detected</h3>
+                <p className="text-base text-[#a1a1aa] mb-5">
+                  {criticalRegions.length} region{criticalRegions.length > 1 ? "s" : ""} requiring immediate attention
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {criticalRegions.map((region) => (
+                    <div key={region.id} className="flex items-center gap-3 px-5 py-3 rounded-lg bg-[#1a1a1a] border border-[#333]">
+                      <StatusDot status={region.riskLevel} pulse />
+                      <span className="text-base font-semibold text-white">{region.id}</span>
+                      <span className="text-sm text-[#a1a1aa]">{region.cascadeProb}% risk</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           </Card>
+        </motion.div>
+      )}
+
+      {/* Region Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {regions.slice(0, 4).map((region, i) => (
+          <motion.div
+            key={region.id}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.05 + i * 0.05 }}
+          >
+            <Card className="p-8">
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <StatusDot status={region.riskLevel} pulse={region.riskLevel === "critical"} />
+                  <h3 className="text-xl font-bold text-white">{region.id}</h3>
+                </div>
+                {region.alerts > 0 && (
+                  <span className="text-xs bg-[#ef4444]/15 text-[#ef4444] px-3 py-1.5 rounded-full font-semibold border border-[#ef4444]/25">
+                    {region.alerts} alert{region.alerts > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm text-[#a1a1aa]">Load</span>
+                    <span className={`text-2xl font-bold font-mono ${loadTextColor(region.load)}`}>
+                      {region.load}%
+                    </span>
+                  </div>
+                  <div className="w-full h-3 bg-[#1a1a1a] rounded-full overflow-hidden">
+                    <motion.div
+                      className={`h-full rounded-full ${loadBarColor(region.load)}`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(region.load / region.capacity) * 100}%` }}
+                      transition={{ duration: 1 }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-[#71717a] font-semibold mb-1">Cascade Risk</p>
+                    <p className={`text-xl font-bold ${riskStyles[region.riskLevel].text}`}>
+                      {region.cascadeProb}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-[#71717a] font-semibold mb-1">Price</p>
+                    <p className={`text-xl font-bold ${region.price > 100 ? "text-[#ef4444]" : "text-white"}`}>
+                      ${region.price}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
         ))}
       </div>
 
       {/* Recent Activity */}
-      <Card className="p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-slate-100">Recent Activity</h2>
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-            </span>
-            <span className="text-sm text-emerald-400 font-medium">Live Updates</span>
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+      >
+        <Card className="p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-white">Recent Activity</h2>
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#22c55e]" />
+              </span>
+              <span className="text-sm text-[#22c55e] font-medium">Live Updates</span>
+            </div>
           </div>
-        </div>
 
-        <div className="space-y-3">
-          {activityFeed.slice(0, 6).map((event) => {
-            const style = eventTypeStyle(event.type);
-            return (
-              <div
-                key={event.id}
-                className="flex items-start gap-4 p-4 rounded-lg hover:bg-slate-800/30 transition-colors"
-              >
-                <span className={`mt-2 w-2.5 h-2.5 rounded-full shrink-0 ${style.dot}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-base text-slate-200 leading-relaxed mb-1">{event.message}</p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-slate-500 font-mono">{event.time}</span>
-                    {event.region && (
-                      <span className="text-sm text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">
-                        {event.region}
-                      </span>
-                    )}
+          <div className="space-y-2">
+            {activityFeed.slice(0, 6).map((event) => {
+              const style = eventTypeStyle(event.type);
+              return (
+                <div
+                  key={event.id}
+                  className="flex items-start gap-4 p-4 rounded-lg hover:bg-[#1a1a1a]/60 transition-colors"
+                >
+                  <span className={`mt-2 w-2.5 h-2.5 rounded-full shrink-0 ${style.dot}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-base text-white/90 leading-relaxed mb-1">{event.message}</p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-[#71717a] font-mono">{event.time}</span>
+                      {event.region && (
+                        <span className="text-sm text-[#71717a] bg-[#1a1a1a] px-2.5 py-0.5 rounded border border-[#333]">
+                          {event.region}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+              );
+            })}
+          </div>
+        </Card>
+      </motion.div>
     </div>
   );
 }
@@ -517,8 +549,8 @@ function MapTab({
       {/* Legend */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-100">National Cascade Risk Map</h2>
-          <div className="flex items-center gap-6 text-sm text-slate-400">
+          <h2 className="text-2xl font-bold text-white">National Cascade Risk Map</h2>
+          <div className="flex items-center gap-6 text-sm text-[#a1a1aa]">
             {(["normal", "monitoring", "elevated", "critical"] as RiskLevel[]).map((level) => (
               <div key={level} className="flex items-center gap-2">
                 <span className={`w-3 h-3 rounded-full ${riskStyles[level].dot}`} />
@@ -535,19 +567,19 @@ function MapTab({
           <div className="relative" style={{ minHeight: 600 }}>
             {/* Background */}
             <div
-              className="absolute inset-0 opacity-[0.04]"
+              className="absolute inset-0 opacity-[0.03]"
               style={{
-                backgroundImage: "radial-gradient(circle, #94a3b8 1px, transparent 1px)",
+                backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)",
                 backgroundSize: "40px 40px",
               }}
             />
 
             {/* Faint US outline */}
-            <svg className="absolute inset-0 w-full h-full opacity-[0.06]" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <svg className="absolute inset-0 w-full h-full opacity-[0.05]" viewBox="0 0 100 100" preserveAspectRatio="none">
               <path
                 d="M 10,15 Q 30,10 50,12 Q 70,10 90,18 L 92,35 Q 88,45 85,55 L 78,65 Q 65,72 55,75 Q 45,78 35,80 Q 25,75 20,68 L 15,55 Q 8,40 10,15 Z"
                 fill="none"
-                stroke="#64748b"
+                stroke="#555"
                 strokeWidth="0.4"
               />
             </svg>
@@ -565,7 +597,7 @@ function MapTab({
                     y1={f.position.y + 4}
                     x2={t.position.x + 5}
                     y2={t.position.y + 4}
-                    stroke={active ? "rgba(96,165,250,0.35)" : "rgba(100,116,139,0.12)"}
+                    stroke={active ? "rgba(59,130,246,0.4)" : "rgba(85,85,85,0.25)"}
                     strokeWidth={active ? "0.3" : "0.15"}
                     strokeDasharray={active ? "" : "2 2"}
                   />
@@ -581,10 +613,10 @@ function MapTab({
                 <motion.button
                   key={region.id}
                   onClick={() => onSelectRegion(isSelected ? null : region.id)}
-                  className={`absolute z-10 text-left transition-all duration-200 rounded-xl border px-4 py-3.5
+                  className={`absolute z-10 text-left transition-all duration-200 rounded-xl border px-4 py-3.5 cursor-pointer
                     ${isSelected
                       ? `${style.bg} ${style.border} shadow-xl ring-2 ring-white/10`
-                      : "bg-slate-800/90 border-slate-600/50 hover:bg-slate-700/90 hover:border-slate-500/70"
+                      : "bg-[#1a1a1a] border-[#333] hover:bg-[#222] hover:border-[#555]"
                     }`}
                   style={{ left: `${region.position.x}%`, top: `${region.position.y}%` }}
                   whileHover={{ scale: 1.05 }}
@@ -592,17 +624,17 @@ function MapTab({
                 >
                   <div className="flex items-center gap-3 mb-2">
                     <StatusDot status={region.riskLevel} pulse={region.riskLevel === "critical"} />
-                    <span className={`text-base font-bold tracking-wide ${isSelected ? style.text : "text-slate-100"}`}>
+                    <span className={`text-base font-bold tracking-wide ${isSelected ? style.text : "text-white"}`}>
                       {region.id}
                     </span>
                     {region.alerts > 0 && (
-                      <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-semibold">
+                      <span className="text-xs bg-[#ef4444]/20 text-[#ef4444] px-2 py-0.5 rounded-full font-semibold">
                         {region.alerts}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2.5">
-                    <div className="w-20 h-2 bg-slate-700/80 rounded-full overflow-hidden">
+                    <div className="w-20 h-2 bg-[#0a0a0a] rounded-full overflow-hidden">
                       <motion.div
                         className={`h-full rounded-full ${loadBarColor(region.load)}`}
                         initial={{ width: 0 }}
@@ -610,7 +642,7 @@ function MapTab({
                         transition={{ duration: 0.8 }}
                       />
                     </div>
-                    <span className="text-sm text-slate-300 font-mono font-semibold">{region.load}%</span>
+                    <span className="text-sm text-[#d4d4d8] font-mono font-semibold">{region.load}%</span>
                   </div>
                 </motion.button>
               );
@@ -629,10 +661,10 @@ function MapTab({
                     style={{ left: `${r.position.x + 12}%`, top: `${r.position.y + 9}%` }}
                   >
                     <div className="flex items-center gap-1.5 opacity-80">
-                      <div className="w-5 h-5 rounded-full bg-blue-500/30 border border-blue-400/50 flex items-center justify-center">
-                        <HiOutlineUserGroup className="w-3 h-3 text-blue-300" />
+                      <div className="w-5 h-5 rounded-full bg-[#3b82f6]/25 border border-[#3b82f6]/40 flex items-center justify-center">
+                        <HiOutlineUserGroup className="w-3 h-3 text-[#3b82f6]" />
                       </div>
-                      <span className="text-xs text-blue-200/80 font-semibold">{crew.crews}</span>
+                      <span className="text-xs text-[#3b82f6]/80 font-semibold">{crew.crews}</span>
                     </div>
                   </div>
                 );
@@ -650,54 +682,49 @@ function MapTab({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
               >
-                <Card className="p-6 space-y-6">
-                  {/* Header */}
+                <Card className="p-8 space-y-6">
                   <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="text-xl font-bold text-slate-100 mb-2">{selectedData.name}</h3>
+                      <h3 className="text-xl font-bold text-white mb-2">{selectedData.name}</h3>
                       <span
-                        className={`inline-flex text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full ${riskStyles[selectedData.riskLevel].bg} ${riskStyles[selectedData.riskLevel].text}`}
+                        className={`inline-flex text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full border ${riskStyles[selectedData.riskLevel].bg} ${riskStyles[selectedData.riskLevel].text} ${riskStyles[selectedData.riskLevel].border}`}
                       >
                         {selectedData.riskLevel}
                       </span>
                     </div>
                     <button
                       onClick={() => onSelectRegion(null)}
-                      className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+                      className="text-[#71717a] hover:text-white transition-colors p-1 cursor-pointer"
                     >
                       <HiOutlineXMark className="w-5 h-5" />
                     </button>
                   </div>
 
-                  {/* Metrics */}
                   <div className="grid grid-cols-2 gap-4">
                     {[
-                      { label: "Load", value: `${selectedData.load}%`, color: loadBarColor(selectedData.load).replace("bg-", "text-") },
+                      { label: "Load", value: `${selectedData.load}%`, color: loadTextColor(selectedData.load) },
                       { label: "Cascade Risk", value: `${selectedData.cascadeProb}%`, color: riskStyles[selectedData.riskLevel].text },
-                      { label: "Frequency", value: `${selectedData.frequency} Hz`, color: selectedData.frequency < 59.98 ? "text-amber-400" : "text-slate-200" },
-                      { label: "Price", value: `$${selectedData.price}/MWh`, color: selectedData.price > 100 ? "text-red-400" : "text-slate-200" },
+                      { label: "Frequency", value: `${selectedData.frequency} Hz`, color: selectedData.frequency < 59.98 ? "text-[#f59e0b]" : "text-white" },
+                      { label: "Price", value: `$${selectedData.price}/MWh`, color: selectedData.price > 100 ? "text-[#ef4444]" : "text-white" },
                     ].map((m) => (
-                      <div key={m.label} className="bg-slate-800/40 rounded-lg p-4">
-                        <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{m.label}</p>
+                      <div key={m.label} className="bg-[#1a1a1a] rounded-xl p-4">
+                        <p className="text-xs uppercase tracking-widest text-[#71717a] font-semibold mb-1">{m.label}</p>
                         <p className={`text-2xl font-bold ${m.color}`}>{m.value}</p>
                       </div>
                     ))}
                   </div>
 
-                  {/* Substations */}
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                      Substations
-                    </h4>
+                    <h4 className="text-xs uppercase tracking-widest text-[#71717a] font-semibold mb-3">Substations</h4>
                     <div className="space-y-2 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar">
                       {substations
                         .filter((s) => s.region === selectedData.id)
                         .sort((a, b) => b.load - a.load)
                         .map((sub) => (
-                          <div key={sub.id} className="flex items-center justify-between py-3 px-3 rounded-lg bg-slate-800/30">
+                          <div key={sub.id} className="flex items-center justify-between py-3 px-4 rounded-lg bg-[#0a0a0a] border border-[#1a1a1a]">
                             <div className="flex items-center gap-3">
                               <StatusDot status={sub.status} pulse={sub.status === "critical"} />
-                              <span className="text-sm text-slate-200 font-medium">{sub.name}</span>
+                              <span className="text-sm text-white font-medium">{sub.name}</span>
                             </div>
                             <span className={`text-base font-mono font-bold ${statusText(sub.status)}`}>
                               {sub.load}%
@@ -707,13 +734,12 @@ function MapTab({
                     </div>
                   </div>
 
-                  {/* Crews */}
-                  <div className="pt-4 border-t border-slate-700/50">
+                  <div className="pt-4 border-t border-[#1a1a1a]">
                     <div className="flex items-center gap-3">
-                      <HiOutlineUserGroup className="w-6 h-6 text-blue-400" />
+                      <HiOutlineUserGroup className="w-6 h-6 text-[#3b82f6]" />
                       <div>
-                        <p className="text-2xl font-bold text-slate-100">{selectedData.crewsDeployed}</p>
-                        <p className="text-sm text-slate-400">Active crews</p>
+                        <p className="text-2xl font-bold text-white">{selectedData.crewsDeployed}</p>
+                        <p className="text-sm text-[#a1a1aa]">Active crews</p>
                       </div>
                     </div>
                   </div>
@@ -722,11 +748,11 @@ function MapTab({
             ) : (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 <Card className="p-12 flex flex-col items-center justify-center text-center min-h-[500px]">
-                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-6">
-                    <HiOutlineMapPin className="w-8 h-8 text-slate-500" />
+                  <div className="w-16 h-16 rounded-full bg-[#1a1a1a] flex items-center justify-center mb-6">
+                    <HiOutlineMapPin className="w-8 h-8 text-[#71717a]" />
                   </div>
-                  <p className="text-lg text-slate-300 font-medium mb-2">Select a Region</p>
-                  <p className="text-sm text-slate-500 max-w-[240px]">
+                  <p className="text-lg text-white font-medium mb-2">Select a Region</p>
+                  <p className="text-base text-[#71717a] max-w-[260px]">
                     Click any region on the map to view detailed status, metrics, and substations
                   </p>
                 </Card>
@@ -749,165 +775,176 @@ function AnalyticsTab() {
   return (
     <div className="space-y-8">
       {/* Outage Prediction */}
-      <Card className="p-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-2">48-Hour Outage Prediction</h2>
-            <p className="text-base text-slate-400">AI-powered cascade risk forecast</p>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <Card className="p-8">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h2 className="text-2xl font-bold text-white mb-2">48-Hour Outage Prediction</h2>
+              <p className="text-base text-[#a1a1aa]">AI-powered cascade risk forecast</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-widest text-[#71717a] font-semibold mb-1">Peak Risk Window</p>
+              <p className={`text-4xl font-bold font-mono ${peakPoint.probability >= 60 ? "text-[#ef4444]" : "text-[#f59e0b]"}`}>
+                {peakPoint.probability}%
+              </p>
+              <p className="text-base text-[#a1a1aa] mt-1">at {peakPoint.hour}</p>
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-slate-500 uppercase tracking-wider mb-1">Peak Risk Window</p>
-            <p className={`text-3xl font-bold ${peakPoint.probability >= 60 ? "text-red-400" : "text-amber-400"}`}>
-              {peakPoint.probability}%
-            </p>
-            <p className="text-base text-slate-400 mt-1">at {peakPoint.hour}</p>
+
+          <div className="flex gap-3 mb-8 flex-wrap">
+            {["Ice Storm (ERCOT)", "Heating Demand +40%", "Low Reserve Margin", "Transmission Constraints"].map((factor) => (
+              <span key={factor} className="text-sm px-4 py-2 rounded-lg bg-[#f59e0b]/10 text-[#f59e0b] border border-[#f59e0b]/20 font-medium">
+                {factor}
+              </span>
+            ))}
           </div>
-        </div>
 
-        {/* Risk factors */}
-        <div className="flex gap-3 mb-8 flex-wrap">
-          {["Ice Storm (ERCOT)", "Heating Demand +40%", "Low Reserve Margin", "Transmission Constraints"].map((factor) => (
-            <span key={factor} className="text-sm px-4 py-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-              {factor}
-            </span>
-          ))}
-        </div>
-
-        {/* Chart */}
-        <div className="h-[400px] -mx-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={predictionData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-              <defs>
-                <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.4} />
-                  <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="hour"
-                tick={{ fontSize: 12, fill: "#64748b" }}
-                axisLine={{ stroke: "#334155" }}
-                tickLine={false}
-                interval={2}
-              />
-              <YAxis
-                tick={{ fontSize: 12, fill: "#64748b" }}
-                axisLine={false}
-                tickLine={false}
-                domain={[0, 100]}
-                tickFormatter={(v) => `${v}%`}
-              />
-              <Tooltip content={<PredictionTooltip />} />
-              <ReferenceLine y={25} stroke="#22c55e" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "Low", position: "right", fill: "#22c55e", fontSize: 12 }} />
-              <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "Medium", position: "right", fill: "#f59e0b", fontSize: 12 }} />
-              <ReferenceLine y={75} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "High", position: "right", fill: "#ef4444", fontSize: 12 }} />
-              <Area
-                type="monotone"
-                dataKey="probability"
-                stroke="#f59e0b"
-                strokeWidth={3}
-                fill="url(#riskGrad)"
-                dot={false}
-                activeDot={{ r: 6, fill: "#f59e0b", stroke: "#1e293b", strokeWidth: 3 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
+          <div className="h-[400px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={predictionData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+                <defs>
+                  <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="hour"
+                  tick={{ fontSize: 13, fill: "#71717a" }}
+                  axisLine={{ stroke: "#333" }}
+                  tickLine={false}
+                  interval={2}
+                />
+                <YAxis
+                  tick={{ fontSize: 13, fill: "#71717a" }}
+                  axisLine={false}
+                  tickLine={false}
+                  domain={[0, 100]}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <Tooltip content={<PredictionTooltip />} />
+                <ReferenceLine y={25} stroke="#22c55e" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "Low", position: "right", fill: "#22c55e", fontSize: 12 }} />
+                <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "Medium", position: "right", fill: "#f59e0b", fontSize: 12 }} />
+                <ReferenceLine y={75} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: "High", position: "right", fill: "#ef4444", fontSize: 12 }} />
+                <Area
+                  type="monotone"
+                  dataKey="probability"
+                  stroke="#f59e0b"
+                  strokeWidth={3}
+                  fill="url(#riskGrad)"
+                  dot={false}
+                  activeDot={{ r: 6, fill: "#f59e0b", stroke: "#111111", strokeWidth: 3 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </motion.div>
 
       {/* Impact Comparison */}
       <div>
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-100 mb-2">AI Prevention Impact Analysis</h2>
-          <p className="text-base text-slate-400">Projected annual outcomes with vs. without prevention system</p>
+          <h2 className="text-2xl font-bold text-white mb-2">AI Prevention Impact Analysis</h2>
+          <p className="text-base text-[#a1a1aa]">Projected annual outcomes with vs. without prevention system</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           {/* WITHOUT */}
-          <Card className="p-8 border-l-4 border-l-red-500 bg-red-500/[0.02]">
-            <div className="flex items-center gap-3 mb-6">
-              <HiOutlineExclamationTriangle className="w-6 h-6 text-red-400" />
-              <h3 className="text-xl font-bold text-red-400">Without Prevention</h3>
-              <span className="text-xs text-red-400/60 ml-auto">Historical Baseline</span>
-            </div>
-            <div className="space-y-6">
-              {splitOutcomeData.map((item) => {
-                const isStability = item.metric === "Grid Stability";
-                const display = isStability
-                  ? `${item.without}%`
-                  : item.metric === "Consumer Cost"
-                    ? `$${item.without}B`
-                    : item.without.toLocaleString();
-                return (
-                  <div key={item.metric}>
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-slate-400">{item.metric}</span>
-                      <span className="text-2xl font-bold text-red-300">{display}</span>
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>
+            <Card className="p-8 border-l-4 border-l-[#ef4444]">
+              <div className="flex items-center gap-3 mb-6">
+                <HiOutlineExclamationTriangle className="w-6 h-6 text-[#ef4444]" />
+                <h3 className="text-xl font-bold text-[#ef4444]">Without Prevention</h3>
+                <span className="text-xs text-[#ef4444]/60 ml-auto">Historical Baseline</span>
+              </div>
+              <div className="space-y-6">
+                {splitOutcomeData.map((item) => {
+                  const isStability = item.metric === "Grid Stability";
+                  const display = isStability
+                    ? `${item.without}%`
+                    : item.metric === "Consumer Cost"
+                      ? `$${item.without}B`
+                      : item.without.toLocaleString();
+                  return (
+                    <div key={item.metric}>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-base text-[#a1a1aa]">{item.metric}</span>
+                        <span className="text-2xl font-bold text-[#ef4444]/80">{display}</span>
+                      </div>
+                      <div className="w-full h-3 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[#ef4444]/50"
+                          style={{ width: isStability ? `${item.without}%` : "100%" }}
+                        />
+                      </div>
                     </div>
-                    <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-red-500/60"
-                        style={{ width: isStability ? `${item.without}%` : "100%" }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
+                  );
+                })}
+              </div>
+            </Card>
+          </motion.div>
 
           {/* WITH */}
-          <Card className="p-8 border-l-4 border-l-emerald-500 bg-emerald-500/[0.02]">
-            <div className="flex items-center gap-3 mb-6">
-              <HiOutlineShieldCheck className="w-6 h-6 text-emerald-400" />
-              <h3 className="text-xl font-bold text-emerald-400">With AI Prevention</h3>
-              <span className="text-xs text-emerald-400/60 ml-auto">Optimized System</span>
-            </div>
-            <div className="space-y-6">
-              {splitOutcomeData.map((item) => {
-                const isStability = item.metric === "Grid Stability";
-                const display = isStability
-                  ? `${item.withPrev}%`
-                  : item.metric === "Consumer Cost"
-                    ? `$${item.withPrev}B`
-                    : item.withPrev.toLocaleString();
-                const barPct = isStability
-                  ? item.withPrev
-                  : Math.round((item.withPrev / item.without) * 100);
-                return (
-                  <div key={item.metric}>
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-slate-400">{item.metric}</span>
-                      <span className="text-2xl font-bold text-emerald-300">{display}</span>
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.15 }}>
+            <Card className="p-8 border-l-4 border-l-[#22c55e]">
+              <div className="flex items-center gap-3 mb-6">
+                <HiOutlineShieldCheck className="w-6 h-6 text-[#22c55e]" />
+                <h3 className="text-xl font-bold text-[#22c55e]">With AI Prevention</h3>
+                <span className="text-xs text-[#22c55e]/60 ml-auto">Optimized System</span>
+              </div>
+              <div className="space-y-6">
+                {splitOutcomeData.map((item) => {
+                  const isStability = item.metric === "Grid Stability";
+                  const display = isStability
+                    ? `${item.withPrev}%`
+                    : item.metric === "Consumer Cost"
+                      ? `$${item.withPrev}B`
+                      : item.withPrev.toLocaleString();
+                  const barPct = isStability
+                    ? item.withPrev
+                    : Math.round((item.withPrev / item.without) * 100);
+                  return (
+                    <div key={item.metric}>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-base text-[#a1a1aa]">{item.metric}</span>
+                        <span className="text-2xl font-bold text-[#22c55e]">{display}</span>
+                      </div>
+                      <div className="w-full h-3 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <motion.div
+                          className="h-full rounded-full bg-[#22c55e]/60"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${isStability ? barPct : Math.max(barPct, 5)}%` }}
+                          transition={{ duration: 1.2 }}
+                        />
+                      </div>
                     </div>
-                    <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full rounded-full bg-emerald-500/70"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${isStability ? barPct : Math.max(barPct, 5)}%` }}
-                        transition={{ duration: 1.2 }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
+                  );
+                })}
+              </div>
+            </Card>
+          </motion.div>
         </div>
 
         {/* Summary stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { label: "Outage-Hours Prevented", value: "10,300", icon: HiOutlineBolt, color: "text-amber-400", bg: "bg-amber-500/10" },
-            { label: "Estimated Lives Saved", value: "328", icon: HiOutlineShieldCheck, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-            { label: "Consumer Cost Savings", value: "$2.02B", icon: HiOutlineArrowTrendingDown, color: "text-blue-400", bg: "bg-blue-500/10" },
-            { label: "Grid Stability Gain", value: "+31%", icon: HiOutlineArrowTrendingUp, color: "text-violet-400", bg: "bg-violet-500/10" },
-          ].map((stat) => (
-            <Card key={stat.label} className={`p-6 ${stat.bg} text-center`}>
-              <stat.icon className={`w-8 h-8 ${stat.color} mx-auto mb-3`} />
-              <p className={`text-3xl font-bold ${stat.color} mb-2`}>{stat.value}</p>
-              <p className="text-sm text-slate-400 leading-tight">{stat.label}</p>
-            </Card>
+            { label: "Outage-Hours Prevented", value: "10,300", icon: HiOutlineBolt, color: "text-[#f59e0b]", bg: "bg-[#f59e0b]/10", border: "border-[#f59e0b]/20" },
+            { label: "Estimated Lives Saved", value: "328", icon: HiOutlineShieldCheck, color: "text-[#22c55e]", bg: "bg-[#22c55e]/10", border: "border-[#22c55e]/20" },
+            { label: "Consumer Cost Savings", value: "$2.02B", icon: HiOutlineArrowTrendingDown, color: "text-[#3b82f6]", bg: "bg-[#3b82f6]/10", border: "border-[#3b82f6]/20" },
+            { label: "Grid Stability Gain", value: "+31%", icon: HiOutlineArrowTrendingUp, color: "text-[#8b5cf6]", bg: "bg-[#8b5cf6]/10", border: "border-[#8b5cf6]/20" },
+          ].map((stat, i) => (
+            <motion.div
+              key={stat.label}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 + i * 0.05 }}
+            >
+              <Card className={`p-8 text-center border ${stat.border}`}>
+                <stat.icon className={`w-8 h-8 ${stat.color} mx-auto mb-3`} />
+                <p className={`text-4xl font-bold font-mono ${stat.color} mb-2`}>{stat.value}</p>
+                <p className="text-sm text-[#a1a1aa] leading-tight">{stat.label}</p>
+              </Card>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -936,57 +973,64 @@ function OperationsTab() {
       <div>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-2">Crew Deployment Status</h2>
-            <p className="text-base text-slate-400">{totalCrews} crews across {crewData.length} active teams</p>
+            <h2 className="text-2xl font-bold text-white mb-2">Crew Deployment Status</h2>
+            <p className="text-base text-[#a1a1aa]">{totalCrews} crews across {crewData.length} active teams</p>
           </div>
-          <button className="flex items-center gap-2 px-5 py-3 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 rounded-lg transition-colors font-medium">
-            <HiOutlineArrowPath className="w-5 h-5" />
+          <button className="flex items-center gap-2 h-11 px-5 rounded-lg border border-[#22c55e]/40 text-[#22c55e] text-sm font-semibold hover:bg-[#22c55e]/10 hover:border-[#22c55e]/60 transition-all cursor-pointer">
+            <HiOutlineArrowPath className="w-4 h-4" />
             Optimize Routes
           </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {crewData.map((crew) => {
-            const urgencyStyle =
+          {crewData.map((crew, i) => {
+            const urgencyBorder =
               crew.priority === "high"
-                ? "border-l-red-500 bg-red-500/[0.03]"
+                ? "border-l-[#ef4444]"
                 : crew.priority === "medium"
-                  ? "border-l-amber-500 bg-amber-500/[0.03]"
-                  : "border-l-blue-500 bg-blue-500/[0.03]";
-            
+                  ? "border-l-[#f59e0b]"
+                  : "border-l-[#3b82f6]";
+
             return (
-              <Card key={crew.id} className={`p-6 border-l-4 ${urgencyStyle}`}>
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <HiOutlineMapPin className="w-5 h-5 text-slate-400" />
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-200">{crew.location}</h3>
-                      <p className="text-sm text-slate-500 mt-0.5">{crew.region}</p>
+              <motion.div
+                key={crew.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: i * 0.05 }}
+              >
+                <Card className={`p-6 border-l-4 ${urgencyBorder}`}>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <HiOutlineMapPin className="w-5 h-5 text-[#71717a]" />
+                      <div>
+                        <h3 className="text-base font-semibold text-white">{crew.location}</h3>
+                        <p className="text-sm text-[#71717a] mt-0.5">{crew.region}</p>
+                      </div>
                     </div>
-                  </div>
-                  <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${crewStatusStyle(crew.status)}`}>
-                    {crew.status}
-                  </span>
-                </div>
-                
-                <div className="flex items-center justify-between pt-4 border-t border-slate-700/50">
-                  <div className="flex items-center gap-6 text-sm text-slate-400">
-                    <span className="flex items-center gap-2">
-                      <HiOutlineUserGroup className="w-4 h-4" /> 
-                      <span className="font-semibold text-slate-300">{crew.crews}</span> crews
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <HiOutlineClock className="w-4 h-4" /> 
-                      <span className="font-semibold text-slate-300">{crew.eta}</span>
+                    <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${crewStatusStyle(crew.status)}`}>
+                      {crew.status}
                     </span>
                   </div>
-                  {crew.priority === "high" && (
-                    <button className="text-sm font-semibold bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 px-4 py-2 rounded-lg transition-colors">
-                      Update Status
-                    </button>
-                  )}
-                </div>
-              </Card>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-[#1a1a1a]">
+                    <div className="flex items-center gap-6 text-sm text-[#a1a1aa]">
+                      <span className="flex items-center gap-2">
+                        <HiOutlineUserGroup className="w-4 h-4" />
+                        <span className="font-semibold text-white">{crew.crews}</span> crews
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <HiOutlineClock className="w-4 h-4" />
+                        <span className="font-semibold text-white">{crew.eta}</span>
+                      </span>
+                    </div>
+                    {crew.priority === "high" && (
+                      <button className="text-sm font-semibold h-9 px-4 rounded-lg border border-[#333] text-[#a1a1aa] hover:text-white hover:border-[#555] transition-colors cursor-pointer">
+                        Update Status
+                      </button>
+                    )}
+                  </div>
+                </Card>
+              </motion.div>
             );
           })}
         </div>
@@ -996,29 +1040,29 @@ function OperationsTab() {
       <div>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-2">AI-Recommended Actions</h2>
-            <p className="text-base text-slate-400">Preventive measures to reduce cascade risk</p>
+            <h2 className="text-2xl font-bold text-white mb-2">AI-Recommended Actions</h2>
+            <p className="text-base text-[#a1a1aa]">Preventive measures to reduce cascade risk</p>
           </div>
-          <span className="text-sm font-medium text-blue-400 bg-blue-500/10 px-4 py-2 rounded-lg">
+          <span className="text-sm font-medium text-[#22c55e] bg-[#22c55e]/10 px-4 py-2 rounded-lg border border-[#22c55e]/20">
             {actions.length} pending actions
           </span>
         </div>
 
         <div className="space-y-4">
           {actions.map((action, i) => {
-            const urgencyStyle =
+            const urgencyBorder =
               action.urgency === "critical"
-                ? "border-l-red-500 bg-red-500/[0.03]"
+                ? "border-l-[#ef4444]"
                 : action.urgency === "high"
-                  ? "border-l-amber-500 bg-amber-500/[0.03]"
-                  : "border-l-blue-500 bg-blue-500/[0.03]";
-            
+                  ? "border-l-[#f59e0b]"
+                  : "border-l-[#3b82f6]";
+
             const urgencyBadge =
               action.urgency === "critical"
-                ? "bg-red-500/15 text-red-400"
+                ? "bg-[#ef4444]/15 text-[#ef4444] border border-[#ef4444]/25"
                 : action.urgency === "high"
-                  ? "bg-amber-500/15 text-amber-400"
-                  : "bg-blue-500/15 text-blue-400";
+                  ? "bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/25"
+                  : "bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/25";
 
             return (
               <motion.div
@@ -1027,19 +1071,19 @@ function OperationsTab() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.05 }}
               >
-                <Card className={`p-6 border-l-4 ${urgencyStyle} hover:bg-slate-800/30 transition-colors`}>
+                <Card className={`p-6 border-l-4 ${urgencyBorder} hover:bg-[#1a1a1a]/60 transition-colors`}>
                   <div className="flex items-start justify-between gap-6">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <HiOutlineLightBulb className="w-5 h-5 text-amber-400" />
-                        <h3 className="text-lg font-semibold text-slate-100">{action.title}</h3>
+                        <HiOutlineLightBulb className="w-5 h-5 text-[#f59e0b]" />
+                        <h3 className="text-lg font-semibold text-white">{action.title}</h3>
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-slate-400">
+                      <div className="flex items-center gap-4 text-sm text-[#a1a1aa]">
                         <span className="flex items-center gap-1.5">
                           <HiOutlineArrowTrendingUp className="w-4 h-4" />
                           {action.impact}
                         </span>
-                        <span>•</span>
+                        <span className="text-[#555]">·</span>
                         <span className="flex items-center gap-1.5">
                           <HiOutlineMapPin className="w-4 h-4" />
                           {action.region}
@@ -1049,7 +1093,7 @@ function OperationsTab() {
                         </span>
                       </div>
                     </div>
-                    <button className="flex items-center gap-2 px-5 py-2.5 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 rounded-lg transition-colors font-semibold whitespace-nowrap">
+                    <button className="flex items-center gap-2 h-11 px-5 rounded-lg border border-[#22c55e]/40 text-[#22c55e] text-sm font-semibold hover:bg-[#22c55e]/10 hover:border-[#22c55e]/60 transition-all cursor-pointer whitespace-nowrap">
                       Execute
                       <HiOutlineChevronRight className="w-4 h-4" />
                     </button>
@@ -1081,50 +1125,43 @@ export default function OperatorDashboard() {
 
   if (!currentTime) {
     return (
-      <div className="fixed inset-0 bg-slate-950 flex items-center justify-center">
+      <div className="fixed inset-0 bg-[#0a0a0a] flex items-center justify-center">
         <div className="flex items-center gap-3">
-          <div className="w-6 h-6 border-3 border-slate-600 border-t-blue-400 rounded-full animate-spin" />
-          <span className="text-base text-slate-400">Loading dashboard...</span>
+          <div className="w-6 h-6 border-2 border-[#333] border-t-[#22c55e] rounded-full animate-spin" />
+          <span className="text-base text-[#a1a1aa]">Loading dashboard...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
-      {/* Scrollbar styles */}
+    <div className="min-h-screen bg-[#0a0a0a] overflow-auto">
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
-        .dashboard-scroll::-webkit-scrollbar { width: 8px; }
-        .dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
-        .dashboard-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 8px; }
-        .dashboard-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #555; }
       `}</style>
 
       <DashboardHeader time={currentTime} activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <main className="flex-1 overflow-y-auto dashboard-scroll">
-        <div className="max-w-[1800px] mx-auto px-8 py-8">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {activeTab === "overview" && <OverviewTab selectedRegion={selectedRegion} />}
-              {activeTab === "map" && (
-                <MapTab selectedRegion={selectedRegion} onSelectRegion={setSelectedRegion} />
-              )}
-              {activeTab === "analytics" && <AnalyticsTab />}
-              {activeTab === "operations" && <OperationsTab />}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+      <main className="max-w-[1400px] mx-auto px-6 py-8">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            {activeTab === "overview" && <OverviewTab />}
+            {activeTab === "map" && (
+              <MapTab selectedRegion={selectedRegion} onSelectRegion={setSelectedRegion} />
+            )}
+            {activeTab === "analytics" && <AnalyticsTab />}
+            {activeTab === "operations" && <OperationsTab />}
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );
