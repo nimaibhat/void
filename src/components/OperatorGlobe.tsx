@@ -284,30 +284,33 @@ export default function OperatorGlobe({
   }), [crews]);
 
   /* ---- Cascade overlay GeoJSON ---- */
+  // Extract stable references from cascadeState to avoid recomputing every render
+  const failedNodeIds = cascadeState?.failedNodeIds ?? null;
+  const rerouteArcs = cascadeState?.rerouteArcs ?? null;
+
   const cascadeFailedGeoJSON = useMemo((): GeoJSON.FeatureCollection => {
-    if (!cascadeState || cascadeState.failedNodeIds.size === 0) {
+    if (!failedNodeIds || failedNodeIds.size === 0) {
       return { type: "FeatureCollection", features: [] };
     }
-    const failedSet = cascadeState.failedNodeIds;
     return {
       type: "FeatureCollection",
       features: gridNodes
-        .filter((n) => failedSet.has(n.id))
+        .filter((n) => failedNodeIds.has(n.id))
         .map((n) => ({
           type: "Feature" as const,
           properties: { id: n.id },
           geometry: { type: "Point" as const, coordinates: [n.lon, n.lat] },
         })),
     };
-  }, [cascadeState, gridNodes]);
+  }, [failedNodeIds, gridNodes]);
 
   const cascadeRerouteGeoJSON = useMemo((): GeoJSON.FeatureCollection => {
-    if (!cascadeState || cascadeState.rerouteArcs.length === 0) {
+    if (!rerouteArcs || rerouteArcs.length === 0) {
       return { type: "FeatureCollection", features: [] };
     }
     return {
       type: "FeatureCollection",
-      features: cascadeState.rerouteArcs.map((r) => ({
+      features: rerouteArcs.map((r) => ({
         type: "Feature" as const,
         properties: { load_mw: r.load_mw },
         geometry: {
@@ -316,20 +319,20 @@ export default function OperatorGlobe({
         },
       })),
     };
-  }, [cascadeState]);
+  }, [rerouteArcs]);
 
   // Track which nodes are "new" this step for shockwave
   const prevFailedRef = useRef<Set<string>>(new Set());
   const shockwaveGeoJSON = useMemo((): GeoJSON.FeatureCollection => {
-    if (!cascadeState || cascadeState.failedNodeIds.size === 0) {
+    if (!failedNodeIds || failedNodeIds.size === 0) {
       prevFailedRef.current = new Set();
       return { type: "FeatureCollection", features: [] };
     }
     const newIds: string[] = [];
-    cascadeState.failedNodeIds.forEach((id) => {
+    failedNodeIds.forEach((id) => {
       if (!prevFailedRef.current.has(id)) newIds.push(id);
     });
-    prevFailedRef.current = new Set(cascadeState.failedNodeIds);
+    prevFailedRef.current = new Set(failedNodeIds);
 
     return {
       type: "FeatureCollection",
@@ -341,7 +344,7 @@ export default function OperatorGlobe({
           geometry: { type: "Point" as const, coordinates: [n.lon, n.lat] },
         })),
     };
-  }, [cascadeState, gridNodes]);
+  }, [failedNodeIds, gridNodes]);
 
   // Shockwave animation state
   const shockwaveStartRef = useRef<number>(0);
@@ -433,20 +436,36 @@ export default function OperatorGlobe({
 
         /* --- Cascade layers (between grid-nodes and hotspots) --- */
         map.addSource("cascade-failed", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        // Red glow behind failed nodes
+        map.addLayer({
+          id: "cascade-failed-glow",
+          type: "circle",
+          source: "cascade-failed",
+          paint: {
+            "circle-color": "#ef4444",
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              2, 10, 6, 18, 10, 28,
+            ],
+            "circle-opacity": 0.25,
+            "circle-blur": 1,
+          },
+        });
+        // Solid failed node dot
         map.addLayer({
           id: "cascade-failed-nodes",
           type: "circle",
           source: "cascade-failed",
           paint: {
-            "circle-color": "#1a0000",
+            "circle-color": "#ef4444",
             "circle-radius": [
               "interpolate", ["linear"], ["zoom"],
-              2, 4, 6, 8, 10, 14,
+              2, 4, 6, 7, 10, 12,
             ],
-            "circle-opacity": 0.9,
-            "circle-stroke-color": "#ef4444",
-            "circle-stroke-width": 2.5,
-            "circle-stroke-opacity": 0.9,
+            "circle-opacity": 0.95,
+            "circle-stroke-color": "#fca5a5",
+            "circle-stroke-width": 1.5,
+            "circle-stroke-opacity": 0.7,
           },
         });
 
@@ -706,24 +725,30 @@ export default function OperatorGlobe({
   /* ---- Update cascade layers ---- */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const src = map.getSource("cascade-failed") as mapboxgl.GeoJSONSource | undefined;
-    if (src) src.setData(cascadeFailedGeoJSON);
+    if (!map) return;
+    try {
+      const src = map.getSource("cascade-failed") as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData(cascadeFailedGeoJSON);
+    } catch { /* source not ready yet */ }
   }, [cascadeFailedGeoJSON]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const src = map.getSource("cascade-reroutes") as mapboxgl.GeoJSONSource | undefined;
-    if (src) src.setData(cascadeRerouteGeoJSON);
+    if (!map) return;
+    try {
+      const src = map.getSource("cascade-reroutes") as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData(cascadeRerouteGeoJSON);
+    } catch { /* source not ready yet */ }
   }, [cascadeRerouteGeoJSON]);
 
   // Shockwave: update source + run expanding ring animation
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const src = map.getSource("cascade-shockwave") as mapboxgl.GeoJSONSource | undefined;
-    if (src) src.setData(shockwaveGeoJSON);
+    if (!map) return;
+    try {
+      const src = map.getSource("cascade-shockwave") as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData(shockwaveGeoJSON);
+    } catch { /* source not ready yet */ }
 
     // Only animate if there are new shockwave points
     if (shockwaveGeoJSON.features.length === 0) return;
@@ -733,16 +758,19 @@ export default function OperatorGlobe({
     const DURATION = 1500; // ms
 
     function animateShockwave() {
-      if (!map || !map.getLayer("cascade-shockwave-ring")) return;
-      const elapsed = performance.now() - shockwaveStartRef.current;
-      const t = Math.min(elapsed / DURATION, 1);
-      const radius = 8 + t * 40;
-      const opacity = (1 - t) * 0.8;
-      map.setPaintProperty("cascade-shockwave-ring", "circle-radius", radius);
-      map.setPaintProperty("cascade-shockwave-ring", "circle-stroke-opacity", opacity);
-      if (t < 1) {
-        shockwaveAnimRef.current = requestAnimationFrame(animateShockwave);
-      }
+      if (!map) return;
+      try {
+        if (!map.getLayer("cascade-shockwave-ring")) return;
+        const elapsed = performance.now() - shockwaveStartRef.current;
+        const t = Math.min(elapsed / DURATION, 1);
+        const radius = 8 + t * 40;
+        const opacity = (1 - t) * 0.8;
+        map.setPaintProperty("cascade-shockwave-ring", "circle-radius", radius);
+        map.setPaintProperty("cascade-shockwave-ring", "circle-stroke-opacity", opacity);
+        if (t < 1) {
+          shockwaveAnimRef.current = requestAnimationFrame(animateShockwave);
+        }
+      } catch { /* layer not ready */ }
     }
     shockwaveAnimRef.current = requestAnimationFrame(animateShockwave);
 

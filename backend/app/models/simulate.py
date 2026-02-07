@@ -41,9 +41,20 @@ class FailedNodeInfo(BaseModel):
     capacity_mw: float
 
 
+class RerouteArc(BaseModel):
+    from_id: str
+    to_id: str
+    from_lat: float
+    from_lon: float
+    to_lat: float
+    to_lon: float
+    load_mw: float
+
+
 class CascadeStep(BaseModel):
     step: int
     new_failures: List[FailedNodeInfo]
+    reroutes: List[RerouteArc] = []
     total_failed: int
     total_load_shed_mw: float
 
