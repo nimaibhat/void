@@ -24,6 +24,7 @@ import {
   type Crew,
   type TimelineEvent,
   type GridNodeData,
+  type GridEdgeData,
 } from "@/lib/api";
 import type { HotspotData, ArcData, GridNode } from "@/components/OperatorGlobe";
 import type { CrewData, EventData } from "@/components/OperatorRightSidebar";
@@ -466,6 +467,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
   const [events, setEvents] = useState<EventData[]>([]);
   const [crewCoverage, setCrewCoverage] = useState(0);
   const [gridNodes, setGridNodes] = useState<GridNode[]>([]);
+  const [gridEdges, setGridEdges] = useState<GridEdgeData[]>([]);
 
   /* ---- UI state ---- */
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
@@ -517,7 +519,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
   /* ---- Fetch grid nodes once (independent of scenario) ---- */
   useEffect(() => {
     fetchGridNodes()
-      .then((nodes) => setGridNodes(nodes))
+      .then(({ nodes, edges }) => { setGridNodes(nodes); setGridEdges(edges); })
       .catch((err) => console.error("Failed to load grid nodes:", err));
   }, []);
 
@@ -691,6 +693,7 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
             hotspots={hotspots}
             arcs={arcs}
             gridNodes={gridNodes}
+            gridEdges={gridEdges}
             focusedLocation={focusedLocation}
             onSelectCity={(city) => setFocusedThreatId(city.id)}
             onDeselectCity={() => {
@@ -716,10 +719,6 @@ export default function OperatorPage({ children }: { children?: ReactNode }) {
         />
       </div>
 
-      {/* ============================================================ */}
-      {/*  BOTTOM TICKER                                                */}
-      {/* ============================================================ */}
-      <BottomTicker items={tickerItems} />
 
       {/* Cascade Simulation Overlay */}
       <CascadeOverlay

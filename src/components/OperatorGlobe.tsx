@@ -33,6 +33,7 @@ export interface GridNode {
   capacity_mw: number;
   voltage_kv: number;
   weather_zone: string;
+  source?: "activsg" | "travis";
 }
 
 interface FocusedLocation {
@@ -41,10 +42,20 @@ interface FocusedLocation {
   altitude: number;
 }
 
+export interface GridEdge {
+  fromLat: number;
+  fromLon: number;
+  toLat: number;
+  toLon: number;
+  source: "activsg" | "travis";
+  capacity_mva: number;
+}
+
 interface OperatorGlobeProps {
   hotspots?: HotspotData[];
   arcs?: ArcData[];
   gridNodes?: GridNode[];
+  gridEdges?: GridEdge[];
   focusedLocation?: FocusedLocation | null;
   onSelectCity?: (city: HotspotData) => void;
   onDeselectCity?: () => void;
@@ -53,8 +64,8 @@ interface OperatorGlobeProps {
 /* ================================================================== */
 /*  DEFAULTS                                                           */
 /* ================================================================== */
-const INITIAL_CENTER: [number, number] = [-98, 32]; // [lng, lat]
-const INITIAL_ZOOM = 2.8;
+const INITIAL_CENTER: [number, number] = [-99.5, 31.5]; // [lng, lat] — centered on Texas
+const INITIAL_ZOOM = 5.2;
 
 const STATUS_COLORS: Record<string, string> = {
   critical: "#ef4444",
@@ -118,6 +129,7 @@ export default function OperatorGlobe({
   hotspots = [],
   arcs = [],
   gridNodes = [],
+  gridEdges = [],
   focusedLocation,
   onSelectCity,
   onDeselectCity,
@@ -170,9 +182,12 @@ export default function OperatorGlobe({
   const gridNodesGeoJSON = useMemo((): GeoJSON.FeatureCollection => ({
     type: "FeatureCollection",
     features: gridNodes.map((n) => {
-      // Color by voltage: 345/500kV = bright, 161kV = medium, <115kV = dim
-      const color = n.voltage_kv >= 300 ? "#3b82f6" : n.voltage_kv >= 100 ? "#6366f1" : "#4b5563";
-      const radius = n.voltage_kv >= 300 ? 3 : n.voltage_kv >= 100 ? 2 : 1.5;
+      // Travis 150 nodes → red; ACTIVSg nodes → color by voltage
+      const isTravis = n.source === "travis";
+      const color = isTravis
+        ? "#ef4444"
+        : n.voltage_kv >= 300 ? "#3b82f6" : n.voltage_kv >= 100 ? "#6366f1" : "#4b5563";
+      const radius = isTravis ? 3.5 : n.voltage_kv >= 300 ? 3 : n.voltage_kv >= 100 ? 2 : 1.5;
       return {
         type: "Feature",
         properties: {
@@ -183,6 +198,7 @@ export default function OperatorGlobe({
           load_mw: n.base_load_mw,
           capacity_mw: n.capacity_mw,
           zone: n.weather_zone,
+          source: n.source ?? "activsg",
         },
         geometry: { type: "Point", coordinates: [n.lon, n.lat] },
       };
@@ -205,6 +221,26 @@ export default function OperatorGlobe({
       },
     })),
   }), [arcs]);
+
+  const gridEdgesGeoJSON = useMemo((): GeoJSON.FeatureCollection => ({
+    type: "FeatureCollection",
+    features: gridEdges.map((e, i) => {
+      const isTravis = e.source === "travis";
+      return {
+        type: "Feature",
+        properties: {
+          color: isTravis ? "#ef4444" : "#3b82f6",
+          opacity: isTravis ? 0.5 : 0.15,
+          width: isTravis ? 1.5 : 0.5,
+          source: e.source,
+        },
+        geometry: {
+          type: "LineString",
+          coordinates: greatCirclePoints(e.fromLon, e.fromLat, e.toLon, e.toLat, 32),
+        },
+      };
+    }),
+  }), [gridEdges]);
 
   /* ---- Initialize map ---- */
   useEffect(() => {
@@ -243,6 +279,29 @@ export default function OperatorGlobe({
 
       map.on("load", () => {
         if (cancelled) return;
+
+        /* --- Grid edges (transmission lines, lowest layer) --- */
+        map.addSource("grid-edges", { type: "geojson", data: gridEdgesGeoJSON });
+        map.addLayer({
+          id: "grid-edge-lines",
+          type: "line",
+          source: "grid-edges",
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              2, ["get", "width"],
+              6, ["*", ["get", "width"], 2],
+              10, ["*", ["get", "width"], 3],
+            ],
+            "line-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              2, ["get", "opacity"],
+              6, ["*", ["get", "opacity"], 1.5],
+              10, ["min", ["*", ["get", "opacity"], 2], 1],
+            ],
+          },
+        });
 
         /* --- Grid infrastructure nodes (background layer) --- */
         map.addSource("grid-nodes", { type: "geojson", data: gridNodesGeoJSON });
@@ -424,6 +483,13 @@ export default function OperatorGlobe({
     if (src) src.setData(gridNodesGeoJSON);
   }, [gridNodesGeoJSON]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("grid-edges") as mapboxgl.GeoJSONSource | undefined;
+    if (src) src.setData(gridEdgesGeoJSON);
+  }, [gridEdgesGeoJSON]);
+
   /* ---- Prop-driven zoom (from sidebar clicks) ---- */
   useEffect(() => {
     if (!focusedLocation || !mapRef.current) return;
@@ -479,15 +545,27 @@ export default function OperatorGlobe({
         </div>
       )}
 
-      {/* Back to overview button */}
-      {isZoomed && (
+      {/* Zoom controls */}
+      <div className="absolute bottom-6 right-6 z-30 flex flex-col gap-1.5">
         <button
-          onClick={handleBackToOverview}
-          className="absolute top-4 left-1/2 -translate-x-1/2 z-30 h-11 px-5 rounded-lg bg-[#111111] border border-[#3f3f46] text-sm text-white font-medium hover:border-[#22c55e]/50 hover:bg-[#1a1a1a] transition-colors cursor-pointer shadow-lg"
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.zoomIn({ duration: 300 });
+          }}
+          className="w-10 h-10 rounded-lg bg-[#111111] border border-[#1a1a1a] text-white/70 hover:text-white hover:border-[#22c55e]/50 transition-colors cursor-pointer flex items-center justify-center text-lg font-mono shadow-lg"
         >
-          ← Back to Overview
+          +
         </button>
-      )}
+        <button
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.zoomOut({ duration: 300 });
+          }}
+          className="w-10 h-10 rounded-lg bg-[#111111] border border-[#1a1a1a] text-white/70 hover:text-white hover:border-[#22c55e]/50 transition-colors cursor-pointer flex items-center justify-center text-lg font-mono shadow-lg"
+        >
+          −
+        </button>
+      </div>
     </div>
   );
 }
