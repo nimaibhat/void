@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -112,3 +112,65 @@ class CreateCustomProfileRequest(BaseModel):
             ]
         }
     }
+
+
+# --- Optimization Models ---
+
+
+class AlertSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class ConsumerStatus(str, Enum):
+    PROTECTED = "PROTECTED"
+    AT_RISK = "AT_RISK"
+    VULNERABLE = "VULNERABLE"
+
+
+class Appliance(BaseModel):
+    name: str
+    power_kw: float
+    duration_hours: float
+    preferred_start: int = Field(ge=0, le=23)
+    flexible: bool = True
+    category: ActionCategory
+
+
+class OptimizedSchedule(BaseModel):
+    appliance: str
+    original_start: int
+    optimized_start: int
+    original_cost: float
+    optimized_cost: float
+    savings: float
+    reason: str
+
+
+class Alert(BaseModel):
+    severity: AlertSeverity
+    title: str
+    description: str
+    timestamp: datetime
+    action: str
+
+
+class ConsumerRecommendation(BaseModel):
+    profile: ConsumerProfile
+    optimized_schedule: List[OptimizedSchedule]
+    total_savings: float
+    readiness_score: int = Field(ge=0, le=100)
+    status: ConsumerStatus
+    alerts: List[Alert]
+    next_risk_window: Optional[str] = None
+
+
+class SavingsSummary(BaseModel):
+    profile_id: str
+    total_savings_dollars: float
+    total_savings_kwh: float
+    readiness_score: int = Field(ge=0, le=100)
+    status: ConsumerStatus
+    optimized_schedule: List[OptimizedSchedule]
+    period_hours: int = 48

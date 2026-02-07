@@ -1,63 +1,64 @@
+"""Pydantic models for cascade simulation request / response."""
+
 from datetime import datetime
-from enum import Enum
-from typing import List
+from typing import Dict, List
 
 from pydantic import BaseModel, Field
 
 
-class TriggerType(str, Enum):
-    HEATWAVE = "heatwave"
-    COLD_SNAP = "cold_snap"
-    CYBERATTACK = "cyberattack"
-    EQUIPMENT_FAILURE = "equipment_failure"
-    DEMAND_SPIKE = "demand_spike"
-    FUEL_SHORTAGE = "fuel_shortage"
+# ── Request ─────────────────────────────────────────────────────────
 
 
-class CascadeScenario(BaseModel):
-    """Input scenario for cascade simulation."""
-
-    trigger: TriggerType = Field(..., examples=["heatwave"])
-    region: str = Field(..., examples=["ERCOT"])
-    severity: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Severity factor from 0 (mild) to 1 (extreme)",
-        examples=[0.8],
+class CascadeRequest(BaseModel):
+    start_time: str = Field(
+        default="2021-02-13T00:00:00",
+        examples=["2021-02-13T00:00:00"],
+        description="ISO datetime for the weather scenario",
     )
-    duration_hours: int = Field(default=24, ge=1, le=720, examples=[72])
-    include_secondary_effects: bool = Field(default=True)
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "trigger": "heatwave",
-                    "region": "ERCOT",
-                    "severity": 0.8,
-                    "duration_hours": 72,
-                    "include_secondary_effects": True,
-                }
-            ]
-        }
-    }
+    forecast_hour: int = Field(
+        default=36,
+        ge=0,
+        le=48,
+        examples=[36],
+        description="Hour offset into the forecast to simulate",
+    )
+    region: str = Field(default="ERCOT", examples=["ERCOT"])
 
 
-class CascadeEvent(BaseModel):
-    hour: int
-    event: str
-    affected_region: str
-    load_shed_mw: float
-    customers_affected: int
+# ── Response sub-objects ────────────────────────────────────────────
 
 
-class CascadeSimulationResponse(BaseModel):
-    simulation_id: str
-    scenario: CascadeScenario
+class FailedNodeInfo(BaseModel):
+    id: str
+    lat: float
+    lon: float
+    load_mw: float
+    capacity_mw: float
+
+
+class CascadeStep(BaseModel):
+    step: int
+    new_failures: List[FailedNodeInfo]
+    total_failed: int
+    total_load_shed_mw: float
+
+
+class FinalNodeState(BaseModel):
+    status: str  # "failed" | "stressed" | "nominal"
+    current_load_mw: float
+    capacity_mw: float
+    load_pct: float
+
+
+class CascadeResult(BaseModel):
+    scenario: str
+    forecast_hour: int
     started_at: datetime
     completed_at: datetime
+    steps: List[CascadeStep]
+    total_failed_nodes: int
+    total_nodes: int
+    cascade_depth: int
     total_load_shed_mw: float
-    peak_customers_affected: int
-    cascade_events: List[CascadeEvent]
-    risk_score: float = Field(ge=0.0, le=10.0)
+    failed_node_ids: List[str]
+    final_node_states: Dict[str, FinalNodeState]
