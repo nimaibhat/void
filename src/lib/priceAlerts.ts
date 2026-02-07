@@ -484,11 +484,13 @@ export interface GeneratedAlerts {
  * @param devices  Array of smart devices from the user's Supabase profile
  * @param region   Grid region (default: "ERCOT")
  * @param scenario Pricing scenario (default: "normal")
+ * @param zone     ERCOT weather zone for zone-adjusted pricing (optional)
  */
 export async function generatePriceAlerts(
   devices: SmartDevice[],
   region = "ERCOT",
-  scenario = "normal"
+  scenario = "normal",
+  zone?: string
 ): Promise<GeneratedAlerts> {
   // Reset counter for fresh IDs
   _alertIdCounter = 0;
@@ -497,7 +499,8 @@ export async function generatePriceAlerts(
   // Use absolute URL since this runs server-side in API routes
   let prices: HourlyPrice[];
   try {
-    const backendUrl = `http://127.0.0.1:8000/api/forecast/prices/${encodeURIComponent(region)}?scenario=${encodeURIComponent(scenario)}`;
+    const zoneParam = zone ? `&zone=${encodeURIComponent(zone)}` : "";
+    const backendUrl = `http://127.0.0.1:8000/api/forecast/prices/${encodeURIComponent(region)}?scenario=${encodeURIComponent(scenario)}${zoneParam}`;
     const res = await fetch(backendUrl);
     if (!res.ok) throw new Error(`Backend ${res.status}`);
     const json = await res.json();

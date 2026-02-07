@@ -45,11 +45,12 @@ export async function GET(req: NextRequest) {
 
   let devices: SmartDevice[] = [];
   let region = "ERCOT";
+  let zone: string | undefined;
 
   if (profileId) {
     const { data, error } = await supabase
       .from("consumer_profiles")
-      .select("smart_devices, grid_region")
+      .select("smart_devices, grid_region, weather_zone")
       .eq("id", profileId)
       .single();
 
@@ -62,6 +63,7 @@ export async function GET(req: NextRequest) {
 
     devices = (data.smart_devices ?? []) as SmartDevice[];
     region = data.grid_region ?? "ERCOT";
+    zone = data.weather_zone ?? undefined;
   } else {
     // Default devices for demo
     devices = [
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
     ];
   }
 
-  const result = await generatePriceAlerts(devices, region, scenario);
+  const result = await generatePriceAlerts(devices, region, scenario, zone);
 
   // Enhance alert text with Claude (falls back to rule-based on error/timeout)
   const priceSummary = summarizePrices(result.prices);

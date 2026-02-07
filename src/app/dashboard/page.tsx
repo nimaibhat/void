@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useRealtimeAlerts, type LiveAlert } from "@/hooks/useRealtimeAlerts";
 import { useRealtimeSession } from "@/hooks/useRealtimeSession";
 import { fetchRecommendations, fetchPrices, type HourlyPrice, type ConsumerRecommendation } from "@/lib/api";
+import { getRegionFromZip } from "@/lib/zipRegions";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -37,6 +38,7 @@ interface DashboardProfile {
   location: string;
   zip: string;
   gridRegion: string;
+  weatherZone: string;
   homeType: string;
   sqft: number;
   devices: Device[];
@@ -60,6 +62,7 @@ const EMPTY_PROFILE: DashboardProfile = {
   location: "",
   zip: "",
   gridRegion: "ERCOT",
+  weatherZone: "South Central",
   homeType: "Single Family",
   sqft: 2400,
   devices: [
@@ -133,6 +136,7 @@ function mapSupabaseRow(row: any): DashboardProfile {
     location: [row.city, row.state].filter(Boolean).join(", ") || `ZIP ${row.zip_code}`,
     zip: row.zip_code,
     gridRegion: row.grid_region,
+    weatherZone: row.weather_zone ?? "South Central",
     homeType: row.home_type,
     sqft: row.square_footage ?? 0,
     devices,
@@ -425,7 +429,36 @@ function DashboardContent() {
   const [recommendation, setRecommendation] = useState<ConsumerRecommendation | null>(null);
   const [enodeUserId, setEnodeUserId] = useState<string | null>(null);
   const [householdId, setHouseholdId] = useState<string | null>("hh-martinez");
+  const [zipInput, setZipInput] = useState("");
+  const [showZipInput, setShowZipInput] = useState(false);
   const time = useCurrentTime();
+
+  // Handle ZIP code change → update zone + persist to Supabase
+  const handleZipChange = useCallback(
+    (newZip: string) => {
+      setZipInput(newZip);
+      if (newZip.length >= 2) {
+        const region = getRegionFromZip(newZip);
+        setProfile((prev) => ({ ...prev, zip: newZip, weatherZone: region.zone }));
+        // Persist to Supabase
+        if (profileId) {
+          supabase
+            .from("consumer_profiles")
+            .update({
+              zip_code: newZip,
+              weather_zone: region.zone,
+              lat: region.lat,
+              lon: region.lng,
+            })
+            .eq("id", profileId)
+            .then(({ error }) => {
+              if (error) console.error("Failed to update zone:", error);
+            });
+        }
+      }
+    },
+    [profileId]
+  );
 
   // Build savings history from optimized_schedule or use defaults
   const savingsHistory = recommendation?.optimized_schedule?.length
@@ -495,7 +528,7 @@ function DashboardContent() {
     setPriceLoading(true);
 
     // Fetch prices directly from backend (client-side, reliable)
-    fetchPrices(profile.gridRegion, scenario)
+    fetchPrices(profile.gridRegion, scenario, undefined, profile.weatherZone)
       .then((prices) => {
         if (prices.length) setPriceData(prices);
       })
@@ -516,7 +549,7 @@ function DashboardContent() {
         }
       })
       .catch((err) => console.error("Failed to fetch alerts:", err));
-  }, [profileId, scenario, profile.gridRegion]);
+  }, [profileId, scenario, profile.gridRegion, profile.weatherZone]);
 
   // Handle alert accept action
   const handleAlertAction = useCallback(
@@ -614,10 +647,46 @@ function DashboardContent() {
             </div>
           </div>
 
-          {/* Center: profile + location */}
-          <span className="text-base text-[#a1a1aa] hidden sm:block">
-            {profile.name} · {profile.location}
-          </span>
+          {/* Center: profile + location + zone badge */}
+          <div className="flex items-center gap-3 hidden sm:flex">
+            <span className="text-base text-[#a1a1aa]">
+              {profile.name} · {profile.location}
+            </span>
+            <div className="relative">
+              <button
+                onClick={() => setShowZipInput((v) => !v)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#22c55e]/25 bg-[#22c55e]/10 text-[11px] font-mono text-[#22c55e] hover:bg-[#22c55e]/20 transition-colors cursor-pointer"
+              >
+                {profile.weatherZone}
+                <svg width="8" height="5" viewBox="0 0 8 5" className="opacity-60">
+                  <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                </svg>
+              </button>
+              {showZipInput && (
+                <div className="absolute top-full mt-2 right-0 bg-[#111111] border border-[#1a1a1a] rounded-lg p-3 shadow-xl z-50 w-52">
+                  <label className="text-[10px] font-mono text-[#52525b] uppercase tracking-widest mb-1.5 block">
+                    Change ZIP Code
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    value={zipInput || profile.zip}
+                    onChange={(e) => handleZipChange(e.target.value.replace(/\D/g, ""))}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setShowZipInput(false); }}
+                    placeholder="78701"
+                    autoFocus
+                    className="w-full bg-[#0a0a0a] border border-[#1a1a1a] rounded-md px-3 py-2 text-sm font-mono text-white placeholder:text-white/20 focus:outline-none focus:border-[#22c55e]/40"
+                  />
+                  {zipInput.length >= 2 && (
+                    <span className="text-[10px] font-mono text-[#22c55e]/60 mt-1.5 block">
+                      Zone: {getRegionFromZip(zipInput).zone}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Right: date/time */}
           <span className="text-sm font-mono text-[#a1a1aa]">{time}</span>
@@ -717,7 +786,7 @@ function DashboardContent() {
         {/* ---------------------------------------------------------- */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           <div className="lg:col-span-3">
-            <PriceForecastChart prices={priceData} loading={priceLoading} />
+            <PriceForecastChart prices={priceData} loading={priceLoading} zone={profile.weatherZone} />
           </div>
           <div className="lg:col-span-2">
             <EnhancedSmartDevicesPanel
