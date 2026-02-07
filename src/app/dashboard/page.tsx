@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import AlertsPanel from "@/components/AlertsPanel";
+import { supabase } from "@/lib/supabase";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -23,6 +25,7 @@ interface Threat {
 
 interface DashboardProfile {
   name: string;
+  location: string;
   zip: string;
   gridRegion: string;
   homeType: string;
@@ -41,6 +44,7 @@ interface DashboardProfile {
 /* ------------------------------------------------------------------ */
 const DEFAULT_PROFILE: DashboardProfile = {
   name: "Martinez Family",
+  location: "Austin, TX",
   zip: "78701",
   gridRegion: "ERCOT",
   homeType: "Single Family",
@@ -62,6 +66,68 @@ const DEFAULT_PROFILE: DashboardProfile = {
   smartActions: 3,
   estSavings: 14.2,
 };
+
+/* ------------------------------------------------------------------ */
+/*  Map Supabase row → DashboardProfile                                */
+/* ------------------------------------------------------------------ */
+const DEVICE_ICON_MAP: Record<string, string> = {
+  thermostat: "🌡️",
+  ev_charger: "🚗",
+  battery: "🔋",
+  solar_inverter: "☀️",
+  smart_plug: "🔌",
+  smart_water_heater: "🌡️",
+  dryer: "🔌",
+  pool_pump: "🏊",
+  generator: "⚡",
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSupabaseRow(row: any): DashboardProfile {
+  const devices: Device[] = (row.smart_devices ?? []).map(
+    (d: { type: string; name: string; level_pct?: number; capacity_kw?: number; level?: string; note?: string }) => ({
+      name: d.name,
+      icon: DEVICE_ICON_MAP[d.type] ?? "⚙️",
+      status: "active",
+      value:
+        d.level_pct != null ? `${d.level_pct}%` :
+        d.capacity_kw != null ? `${d.capacity_kw} kW` :
+        d.level ?? d.note ?? "on",
+    })
+  );
+
+  const threats: Threat[] = (row.active_threats ?? []).map(
+    (t: { event: string; area: string; severity: number }) => ({
+      name: `${t.event} — ${t.area}`,
+      severity: t.severity,
+      region: t.area,
+    })
+  );
+
+  const statusNorm = (row.status ?? "").toUpperCase();
+  let status: DashboardProfile["status"] = "MONITORING";
+  if (statusNorm === "PROTECTED") status = "PROTECTED";
+  else if (statusNorm === "AT RISK") status = "AT RISK";
+
+  const nextRisk = row.next_risk_window ?? "";
+  const nextRiskShort = nextRisk.split("–")[0]?.trim() || nextRisk.split("—")[0]?.trim() || nextRisk;
+
+  return {
+    name: row.name,
+    location: [row.city, row.state].filter(Boolean).join(", ") || `ZIP ${row.zip_code}`,
+    zip: row.zip_code,
+    gridRegion: row.grid_region,
+    homeType: row.home_type,
+    sqft: row.square_footage ?? 0,
+    devices,
+    threats,
+    readinessScore: row.readiness_score ?? 0,
+    status,
+    nextRiskWindow: nextRiskShort,
+    smartActions: (row.smart_actions ?? []).length,
+    estSavings: Number(row.estimated_savings_dollars) || 0,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Animated ring                                                      */
@@ -297,9 +363,44 @@ function useCurrentTime() {
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 export default function DashboardPage() {
-  const profile = DEFAULT_PROFILE;
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <span className="text-sm font-mono text-white/30">loading dashboard...</span>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
+  const searchParams = useSearchParams();
+  const profileId = searchParams.get("id");
+
+  const [profile, setProfile] = useState<DashboardProfile>(DEFAULT_PROFILE);
+  const [loading, setLoading] = useState(!!profileId);
   const time = useCurrentTime();
   const savingsHistory = [8.4, 9.1, 11.3, 10.8, 12.5, 13.1, 14.2];
+
+  // Fetch profile from Supabase
+  useEffect(() => {
+    if (!profileId) return;
+    setLoading(true);
+    supabase
+      .from("consumer_profiles")
+      .select("*")
+      .eq("id", profileId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) {
+          console.error("Failed to fetch profile:", error);
+        } else {
+          setProfile(mapSupabaseRow(data));
+        }
+        setLoading(false);
+      });
+  }, [profileId]);
 
   // Countdown to next risk window (mock: 36h 14m from now)
   const [countdown, setCountdown] = useState("36h 14m");
@@ -322,6 +423,14 @@ export default function DashboardPage() {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
   }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <span className="text-sm font-mono text-white/30 animate-pulse">loading profile...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] overflow-auto">
@@ -348,7 +457,7 @@ export default function DashboardPage() {
 
           {/* Center: profile + location */}
           <span className="text-base text-[#a1a1aa] hidden sm:block">
-            {profile.name} · Austin, TX
+            {profile.name} · {profile.location}
           </span>
 
           {/* Right: date/time */}
