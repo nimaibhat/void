@@ -1,8 +1,27 @@
 # void
 
+## Hackathon Tracks
+
+### Best Financial Hack (Capital One)
+Capital One's energy initiatives really appealed to us while building this. We wanted something that crosses both finance and sustainability, not just one or the other. On the consumer side, void forecasts wholesale electricity prices 48 hours out using an XGBoost model trained on 43,818 hours of real ERCOT load data, then acts on the citizen's behalf, automatically shifting EV charging, pre-cooling homes, and scheduling battery discharge so households get hands-off savings without thinking about it. On the operator side, the city view is focused on sustainability: grid operators see cascade risk in real time, dispatch repair crews, and manage load across 2,173 nodes to keep the grid stable. The end result is that peak load goes down and households save money. We think this could realistically be adopted by energy companies, local governments, or bundled into utility apps.
+
+### Best Use of CodeRabbit
+In the CodeRabbit tech talk we learned that you could customize the tone of code reviews to do pretty much anything, including roasting your teammates. We thought that was hilarious, so we ran with it. Our `.coderabbit.yaml` has CodeRabbit configured to review PRs like Gordon Ramsay in a kitchen nightmare. It calls bugs "raw chicken", clean code "a Michelin star", and bad PRs get the full Hell's Kitchen treatment. Beyond the comedy, we actually used CodeRabbit throughout the entire hackathon for real code reviews on every PR, catching type errors, missing RLS policies, and performance issues we would have missed at 3am. The combination of genuinely useful reviews delivered through an unhinged personality made us actually look forward to opening PR comments.
+
+### Best Use of XRPL (Build an MVP that leverages the XRP Ledger's core features)
+When a consumer follows a price alert and shifts their energy usage, the savings are real but small, often a few dollars. void uses the XRP Ledger to pay those savings out as RLUSD stablecoin directly to the household's wallet. The system creates Testnet wallets, sets up RLUSD trustlines, and sends micropayouts automatically when accumulated savings cross a threshold. XRPL's near-zero transaction fees make sub-dollar energy rebates actually viable, which is something traditional payment rails can't do without eating the entire payout in processing fees.
+
+---
+
 void is a full-stack grid intelligence platform that forecasts electricity prices, simulates cascade failures across the Texas power grid, dispatches repair crews, and gives consumers real-time alerts to shift their energy usage. It combines a 2,173-node synthetic grid model with historical ERCOT load data, live weather from Open-Meteo, and an XGBoost price prediction model trained on 43,818 hourly records.
 
 Built for the scenario where Winter Storm Uri hits again and the grid needs to respond in real time.
+
+### Best Use of CodeRabbit
+In the CodeRabbit tech talk we learned that you could customize the tone of code reviews to do pretty much anything, including roasting your teammates. We thought that was hilarious, so we ran with it. Our `.coderabbit.yaml` has CodeRabbit configured to review PRs like Gordon Ramsay in a kitchen nightmare. It calls bugs "raw chicken", clean code "a Michelin star", and bad PRs get the full Hell's Kitchen treatment. Beyond the comedy, we actually used CodeRabbit throughout the entire hackathon for real code reviews on every PR, catching type errors, missing RLS policies, and performance issues we would have missed at 3am. The combination of genuinely useful reviews delivered through an unhinged personality made us actually look forward to opening PR comments.
+
+### Best Use of XRPL (Build an MVP that leverages the XRP Ledger's core features)
+When a consumer follows a price alert and shifts their energy usage, the savings are real but small, often a few dollars. void uses the XRP Ledger to pay those savings out as RLUSD stablecoin directly to the household's wallet. The system creates Testnet wallets, sets up RLUSD trustlines, and sends micropayouts automatically when accumulated savings cross a threshold. XRPL's near-zero transaction fees make sub-dollar energy rebates actually viable, which is something traditional payment rails can't do without eating the entire payout in processing fees.
 
 ## Table of Contents
 
