@@ -658,14 +658,11 @@ function DashboardContent() {
 
   // Realtime live alerts from orchestrated simulations
   const { liveAlerts } = useRealtimeAlerts(profile.gridRegion);
-<<<<<<< HEAD
-=======
 
   // Realtime session — when operator runs a sim, switch scenario
   const { session: liveSession } = useRealtimeSession();
   const scenario = liveSession?.scenario ?? "live";
 
->>>>>>> e38d229e675e94be91ff3effeaa1a35bd32963d5
   // Derive householdId from profile name
   const deriveHouseholdId = (name: string): string | null => {
     const lower = name.toLowerCase();
@@ -675,15 +672,7 @@ function DashboardContent() {
     return null;
   };
 
-<<<<<<< HEAD
-  // Realtime session — when operator runs a sim, switch scenario
-  const { session: liveSession } = useRealtimeSession();
-  const scenario = liveSession?.scenario ?? "live";
-
   // Fetch profile from Supabase (always — no hardcoded fallback)
-=======
-  // Fetch profile from Supabase
->>>>>>> e38d229e675e94be91ff3effeaa1a35bd32963d5
   useEffect(() => {
     setLoading(true);
     supabase
